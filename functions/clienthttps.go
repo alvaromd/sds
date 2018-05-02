@@ -1,22 +1,27 @@
-/*
-
-Este programa muestra comunicarse entre cliente y servidor,
-así como el uso de HTTPS (HTTP sobre TLS) mediante certificados (autofirmados).
-
-Conceptos: JSON, TLS
-
-*/
-
 package functions
 
 import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+//Users struct que contiene un array de users
+type Users struct {
+	Users []User `json:"users"`
+}
+
+//User struct del usuario
+type User struct {
+	Name     string `json:"Name"`
+	Password string `json:"Password"`
+}
 
 /***
 CLIENTE
@@ -32,26 +37,66 @@ func Client() {
 	}
 	client := &http.Client{Transport: tr}
 
-	var username string
-	var password string
+	var user User // struct
 	var command string
+	var register string
 
 	fmt.Printf("Username: ")
-	fmt.Scanf("%s\n", &username)
+	fmt.Scanf("%s\n", &user.Name)
 
 	fmt.Printf("Password: ")
-	fmt.Scanf("%s\n", &password)
+	fmt.Scanf("%s\n", &user.Password)
 
-	fmt.Printf("Command: ")
-	fmt.Scanf("%s\n", &command)
+	// Hasheamos la contraseña
+	password, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// ** ejemplo de registro
-	data := url.Values{}          // estructura para contener los valores
-	data.Set("cmd", command)      // comando (string)
-	data.Set("usuario", username) // usuario (string)
+	for command != "exit" {
 
-	r, err := client.PostForm("https://localhost:10443", data) // enviamos por POST
-	Chk(err)
-	io.Copy(os.Stdout, r.Body) // mostramos el cuerpo de la respuesta (es un reader)
-	fmt.Println()
+		if command == "logout" {
+			fmt.Printf("-- Logged out, login again --")
+			fmt.Printf("\nUsername: ")
+			fmt.Scanf("%s\n", &user.Name)
+
+			fmt.Printf("Password: ")
+			fmt.Scanf("%s\n", &user.Password)
+		}
+
+		// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
+		// Usuario existe
+		if CheckIfExists(user.Name) == true {
+			// Comprobar contraseña
+			if CheckPassword(user.Name, password) {
+				fmt.Println("Login correcto")
+			}
+		} else {
+			fmt.Println("No estás registrado, ¿deseas hacerlo? [Y] [N]")
+			fmt.Scanf("%s\n", &register)
+		}
+
+		if register == "Y" {
+			command = "save"
+			register = ""
+		} else if register == "N" {
+			fmt.Println("Saliendo del sistema")
+			command = "exit"
+		} else {
+			fmt.Printf("Options: hola | save | read | logout | exit")
+			fmt.Printf("\nCommand: ")
+			fmt.Scanf("%s\n", &command)
+		}
+
+		// ** ejemplo de registro
+		data := url.Values{}                // estructura para contener los valores
+		data.Set("cmd", command)            // comando (string)
+		data.Set("username", user.Name)     // usuario (string)
+		data.Set("password", user.Password) // password (string)
+
+		r, err := client.PostForm("https://localhost:10443", data) // enviamos por POST
+		chk(err)
+		io.Copy(os.Stdout, r.Body) // mostramos el cuerpo de la respuesta (es un reader)
+		fmt.Println()
+	}
 }

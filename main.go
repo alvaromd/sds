@@ -8,7 +8,6 @@ import (
 
 func main() {
 
-	fmt.Println("Un ejemplo de server/cliente mediante TLS/HTTP en Go.")
 	s := "Introduce srv para funcionalidad de servidor y cli para funcionalidad de cliente"
 
 	if len(os.Args) > 1 {
