@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -143,15 +142,6 @@ func loadMap(gUsers map[string]User) bool {
 	return true
 }
 
-// Recorremos el mapa y mostramos las entradas
-func showDbEntries(gUsers map[string]User, keyData []byte) {
-	fmt.Printf("User database: \n")
-	for k := range gUsers {
-		fmt.Printf("    %s - %s\n", gUsers[k].Name, decrypt(decode64(gUsers[k].Password), keyData)) // decodificamos y desencriptamos las contraseñas
-	}
-	return
-}
-
 func (u User) toString() string {
 	bytes, err := json.Marshal(u)
 	if err != nil {
@@ -178,34 +168,19 @@ func ReadUsers() {
 // SaveUser Guarda el usuario y la contraseña cifrados
 func SaveUser(username string, password string) {
 
-	var masterKey string
 	gUsers := make(map[string]User)
-
-	// la primera vez pedimos una clave maestra
-	if !loadMap(gUsers) {
-		fmt.Print("Enter master key (first time): ")
-	} else {
-		fmt.Print("Enter master key: ")
-	}
-	fmt.Scanf("%s \n", &masterKey)
 
 	var newUser User
 	newUser.Name = username
 
-	pass := password
-
-	// Generamos clave usando SHA512
-	keyClient := sha512.Sum512([]byte(masterKey))
-	keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
-
 	// Hash en servidor con Bcrypt
-	passHash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
+	passHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Encriptamos la contraseña hasheada y codificamos en base64
-	newUser.Password = encode64(encrypt([]byte(passHash), keyData))
+	// Guardo hash como pass del objeto User
+	newUser.Password = encode64(passHash)
 
 	// Almacenamos el usuario
 	gUsers[newUser.Name] = newUser
@@ -215,10 +190,6 @@ func SaveUser(username string, password string) {
 	if err != nil {
 		fmt.Println(err)
 	}
-
-	// Mostramos base de datos (desciframos contraseñas) - al hacer bcrypt ya no puedo descifrarlas, solo comparar
-	// Esto me puede servir para mostrar archivos
-	showDbEntries(gUsers, keyData)
 
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
@@ -245,7 +216,9 @@ func CheckIfExists(user string) bool {
 }
 
 // CheckPassword comprueba si la contraseña es correcta
-func CheckPassword(user string, password []byte) bool {
+func CheckPassword(user string, password string) bool {
+
+	var correct = false
 
 	users := make(map[string]User)
 	raw, err := ioutil.ReadFile("./db/db.json")
@@ -254,18 +227,18 @@ func CheckPassword(user string, password []byte) bool {
 	}
 	json.Unmarshal(raw, &users)
 
-	// Generamos clave usando SHA512
-	keyClient := sha512.Sum512([]byte(password))
-	keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
-
 	for us := range users {
 		var name = users[us].Name
 		if name == user {
-			pass := decrypt(decode64(users[us].Password), keyData)
-			bcrypt.CompareHashAndPassword(password, pass)
-			return true
+			//pass := users[us].Password
+
+			/*
+				if bcrypt.CompareHashAndPassword() == nil {
+					correct = true
+				}
+			*/
 		}
 	}
 
-	return false
+	return correct
 }

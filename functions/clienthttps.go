@@ -1,15 +1,13 @@
 package functions
 
 import (
+	"crypto/sha512"
 	"crypto/tls"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 //Users struct que contiene un array de users
@@ -47,12 +45,6 @@ func Client() {
 	fmt.Printf("Password: ")
 	fmt.Scanf("%s\n", &user.Password)
 
-	// Hasheamos la contraseña
-	password, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	for command != "exit" {
 
 		if command == "logout" {
@@ -64,11 +56,16 @@ func Client() {
 			fmt.Scanf("%s\n", &user.Password)
 		}
 
+		// Hasheamos la contraseña usando SHA512
+		passwordHash := sha512.Sum512([]byte(user.Password))
+		slice := passwordHash[:]
+		// Codificación base64
+		pass := encode64(slice)
+
 		// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
-		// Usuario existe
 		if CheckIfExists(user.Name) == true {
 			// Comprobar contraseña
-			if CheckPassword(user.Name, password) {
+			if CheckPassword(user.Name, pass) {
 				fmt.Println("Login correcto")
 			}
 		} else {
