@@ -86,10 +86,10 @@ func Client() {
 		}
 
 		// ** ejemplo de registro
-		data := url.Values{}                // estructura para contener los valores
-		data.Set("cmd", command)            // comando (string)
-		data.Set("username", user.Name)     // usuario (string)
-		data.Set("password", user.Password) // password (string)
+		data := url.Values{}            // estructura para contener los valores
+		data.Set("cmd", command)        // comando (string)
+		data.Set("username", user.Name) // usuario (string)
+		data.Set("password", pass)      // password (string) con hash y base64
 
 		r, err := client.PostForm("https://localhost:10443", data) // enviamos por POST
 		chk(err)

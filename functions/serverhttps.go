@@ -219,24 +219,21 @@ func CheckIfExists(user string) bool {
 func CheckPassword(user string, password string) bool {
 
 	var correct = false
-
 	users := make(map[string]User)
+
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
 		fmt.Println(err.Error())
 	}
+
 	json.Unmarshal(raw, &users)
 
 	for us := range users {
 		var name = users[us].Name
 		if name == user {
-			//pass := users[us].Password
-
-			/*
-				if bcrypt.CompareHashAndPassword() == nil {
-					correct = true
-				}
-			*/
+			if bcrypt.CompareHashAndPassword(decode64(users[us].Password), []byte(password)) == nil {
+				correct = true
+			}
 		}
 	}
 
