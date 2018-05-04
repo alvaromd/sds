@@ -80,17 +80,15 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	var pass = req.Form.Get("password")
 
 	switch req.Form.Get("cmd") { // comprobamos comando desde el cliente
-	case "hola": // ** registro
-		response(w, true, "Hola "+req.Form.Get("username"))
 	case "save":
 		SaveUser(user, pass)
 	case "logout":
-		fmt.Println("Logging out...")
+		fmt.Println("Desconectando...")
 		break
 	case "read":
 		ReadUsers()
 	case "exit":
-		fmt.Println("Exiting...")
+		fmt.Println("Saliendo...")
 		break
 	default:
 		response(w, false, "Comando inválido")
@@ -131,7 +129,7 @@ func decrypt(data, key []byte) (out []byte) {
 	return
 }
 
-// funcion para cargar base de datos
+// Funcion para cargar base de datos
 func loadMap(gUsers map[string]User) bool {
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
@@ -168,7 +166,16 @@ func ReadUsers() {
 // SaveUser Guarda el usuario y la contraseña cifrados
 func SaveUser(username string, password string) {
 
+	var masterKey string
 	gUsers := make(map[string]User)
+
+	// la primera vez pedimos una clave maestra
+	if !loadMap(gUsers) {
+		fmt.Print("Enter master key (first time): ")
+	} else {
+		fmt.Print("Enter master key: ")
+	}
+	fmt.Scanf("%s \n", &masterKey)
 
 	var newUser User
 	newUser.Name = username
@@ -199,6 +206,7 @@ func SaveUser(username string, password string) {
 // CheckIfExists Comprueba si el usuario ya existe en la bbdd
 func CheckIfExists(user string) bool {
 	users := make(map[string]User)
+
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
 		fmt.Println(err.Error())
@@ -230,6 +238,8 @@ func CheckPassword(user string, password string) bool {
 
 	for us := range users {
 		var name = users[us].Name
+		fmt.Println("Name: " + users[us].Name)
+
 		if name == user {
 			if bcrypt.CompareHashAndPassword(decode64(users[us].Password), []byte(password)) == nil {
 				correct = true
