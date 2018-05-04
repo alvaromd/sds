@@ -38,6 +38,7 @@ func Client() {
 	var user User // struct
 	var command string
 	var register string
+	var checked bool
 
 	fmt.Printf("Username: ")
 	fmt.Scanf("%s\n", &user.Name)
@@ -54,6 +55,8 @@ func Client() {
 
 			fmt.Printf("Password: ")
 			fmt.Scanf("%s\n", &user.Password)
+
+			checked = false
 		}
 
 		// Hasheamos la contraseña usando SHA512
@@ -65,8 +68,9 @@ func Client() {
 		// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
 		if CheckIfExists(user.Name) == true {
 			// Comprobar contraseña
-			if CheckPassword(user.Name, pass) {
+			if CheckPassword(user.Name, pass) && !checked {
 				fmt.Println("Login correcto")
+				checked = true
 			}
 		} else {
 			fmt.Println("No estás registrado, ¿deseas hacerlo? [Y] [N]")
@@ -80,12 +84,12 @@ func Client() {
 			fmt.Println("Saliendo del sistema")
 			command = "exit"
 		} else {
-			fmt.Printf("Options: hola | save | read | logout | exit")
+			fmt.Printf("Options: hola | save | list | logout | exit")
 			fmt.Printf("\nCommand: ")
 			fmt.Scanf("%s\n", &command)
 		}
 
-		// ** ejemplo de registro
+		// registro
 		data := url.Values{}            // estructura para contener los valores
 		data.Set("cmd", command)        // comando (string)
 		data.Set("username", user.Name) // usuario (string)
@@ -93,7 +97,9 @@ func Client() {
 
 		r, err := client.PostForm("https://localhost:10443", data) // enviamos por POST
 		chk(err)
+
 		io.Copy(os.Stdout, r.Body) // mostramos el cuerpo de la respuesta (es un reader)
+
 		fmt.Println()
 	}
 }

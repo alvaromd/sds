@@ -32,12 +32,23 @@ type resp struct {
 	Msg string // mensaje adicional
 }
 
+type file struct {
+	Name string
+	Size int64
+}
+
 // función para escribir una respuesta del servidor
 func response(w io.Writer, ok bool, msg string) {
 	r := resp{Ok: ok, Msg: msg}    // formateamos respuesta
 	rJSON, err := json.Marshal(&r) // codificamos en JSON
 	chk(err)                       // comprobamos error
 	w.Write(rJSON)                 // escribimos el JSON resultante
+}
+
+func responseFiles(w io.Writer, fichero map[int]file) {
+	rJSON, err := json.Marshal(&fichero) // codificamos en JSON
+	chk(err)                             // comprobamos error
+	w.Write(rJSON)                       // escribimos el JSON resultante
 }
 
 /***
@@ -80,13 +91,21 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	var pass = req.Form.Get("password")
 
 	switch req.Form.Get("cmd") { // comprobamos comando desde el cliente
+	case "hola": // ** registro
+		response(w, true, "Hola "+req.Form.Get("mensaje"))
 	case "save":
-		SaveUser(user, pass)
+		saveUser(user, pass)
 	case "logout":
 		fmt.Println("Desconectando...")
 		break
 	case "read":
-		ReadUsers()
+		readUsers()
+	case "list":
+		files := listFiles(user)
+
+		responseFiles(w, files)
+
+		//uploadFiles(user)
 	case "exit":
 		fmt.Println("Saliendo...")
 		break
@@ -149,8 +168,8 @@ func (u User) toString() string {
 	return string(bytes)
 }
 
-// ReadUsers Funcion para leer los usuarios desde el archivo db.json
-func ReadUsers() {
+// readUsers Funcion para leer los usuarios desde el archivo db.json
+func readUsers() {
 	users := make(map[string]User)
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
@@ -163,8 +182,8 @@ func ReadUsers() {
 	}
 }
 
-// SaveUser Guarda el usuario y la contraseña cifrados
-func SaveUser(username string, password string) {
+// saveUser Guarda el usuario y la contraseña cifrados
+func saveUser(username string, password string) {
 
 	var masterKey string
 	gUsers := make(map[string]User)
@@ -197,6 +216,9 @@ func SaveUser(username string, password string) {
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	// Creamos carpeta donde el usuario subira sus ficheros
+	os.Mkdir("./files/"+username, 0777)
 
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
@@ -238,7 +260,6 @@ func CheckPassword(user string, password string) bool {
 
 	for us := range users {
 		var name = users[us].Name
-		fmt.Println("Name: " + users[us].Name)
 
 		if name == user {
 			if bcrypt.CompareHashAndPassword(decode64(users[us].Password), []byte(password)) == nil {
@@ -248,4 +269,32 @@ func CheckPassword(user string, password string) bool {
 	}
 
 	return correct
+}
+
+func listFiles(user string) map[int]file {
+
+	// Creo un mapa de ficheros
+	gFiles := make(map[int]file)
+
+	files, err := ioutil.ReadDir("./files/" + user)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	// Guardo la información
+	for i, f := range files {
+
+		// Creo un archivo
+		var archivo = file{Name: f.Name(), Size: f.Size()}
+		gFiles[i] = archivo
+	}
+
+	fmt.Println(gFiles)
+
+	return gFiles
+}
+
+func uploadFiles(user string) bool {
+
+	return false
 }
