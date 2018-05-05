@@ -89,7 +89,7 @@ func Client() {
 			fmt.Scanf("%s\n", &command)
 		}
 
-		// registro
+		// Registro
 		data := url.Values{}            // estructura para contener los valores
 		data.Set("cmd", command)        // comando (string)
 		data.Set("username", user.Name) // usuario (string)

@@ -62,6 +62,8 @@ func Server() {
 	signal.Notify(stopChan, os.Interrupt)
 
 	mux := http.NewServeMux()
+
+	//
 	mux.Handle("/", http.HandlerFunc(handler))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
