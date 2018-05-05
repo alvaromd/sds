@@ -3,23 +3,14 @@ package functions
 import (
 	"crypto/sha512"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 )
-
-//Users struct que contiene un array de users
-type Users struct {
-	Users []User `json:"users"`
-}
-
-//User struct del usuario
-type User struct {
-	Name     string `json:"Name"`
-	Password string `json:"Password"`
-}
 
 /***
 CLIENTE
@@ -95,10 +86,26 @@ func Client() {
 		data.Set("username", user.Name) // usuario (string)
 		data.Set("password", pass)      // password (string) con hash y base64
 
-		r, err := client.PostForm("https://localhost:10443", data) // enviamos por POST
-		chk(err)
+		if command != "list" {
+			r, err := client.PostForm("https://localhost:10443", data)
+			chk(err)
+			io.Copy(os.Stdout, r.Body)
+		} else {
+			r, err := client.Get("https://localhost:10443/prueba")
+			chk(err)
 
-		io.Copy(os.Stdout, r.Body) // mostramos el cuerpo de la respuesta (es un reader)
+			responseData, err := ioutil.ReadAll(r.Body)
+
+			var responseObject []file
+			json.Unmarshal(responseData, &responseObject)
+
+			for i := 0; i < len(responseObject); i++ {
+				fmt.Print("[")
+				fmt.Print(i + 1)
+				fmt.Print("] - ")
+				fmt.Println(responseObject[i].Name)
+			}
+		}
 
 		fmt.Println()
 	}

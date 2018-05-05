@@ -19,6 +19,22 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+//User struct del usuario
+type User struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+// JwtToken struct para el token de autenticacion del usuario
+type JwtToken struct {
+	Token string `json:"token"`
+}
+
+// Exception mensaje de excepcion
+type Exception struct {
+	Message string `json:"message"`
+}
+
 //Chk función para comprobar errores (ahorra escritura)
 func chk(e error) {
 	if e != nil {
@@ -51,6 +67,10 @@ func responseFiles(w io.Writer, fichero map[int]file) {
 	w.Write(rJSON)                       // escribimos el JSON resultante
 }
 
+func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {}
+
+func ProtectedEndpoint(w http.ResponseWriter, req *http.Request) {}
+
 /***
 SERVIDOR
 ***/
@@ -63,8 +83,9 @@ func Server() {
 
 	mux := http.NewServeMux()
 
-	//
+	// Endpoints de la aplicacion
 	mux.Handle("/", http.HandlerFunc(handler))
+	mux.Handle("/prueba", http.HandlerFunc(handlerPrueba))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -299,4 +320,21 @@ func listFiles(user string) map[int]file {
 func uploadFiles(user string) bool {
 
 	return false
+}
+
+func handlerPrueba(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+
+	f := []file{
+		file{
+			Name: "ejemplo1.txt", Size: 16,
+		},
+		file{
+			Name: "ejemplo2.txt", Size: 5,
+		},
+	}
+
+	json.NewEncoder(w).Encode(f)
+
+	//w.Write(rJSON)
 }
