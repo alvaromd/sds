@@ -39,7 +39,6 @@ func Client() {
 	var user User
 	var regUser User
 	var command string
-	var register string
 	var checked bool
 
 	// Mientras no elija salir
@@ -47,10 +46,9 @@ func Client() {
 
 		if command != "register" {
 			if checked {
-				fmt.Println("Bienvenido/a " + user.Name)
-				fmt.Printf("Options: | list | logout |")
+				fmt.Printf("Options: | list | upload | logout | exit |")
 			} else {
-				fmt.Printf("Options: | login | register |")
+				fmt.Printf("Options: | login | register | exit |")
 			}
 		}
 
@@ -62,7 +60,7 @@ func Client() {
 		}
 
 		switch command {
-		// LOGIN
+		// Autenticacion
 		case "login":
 			fmt.Printf("Username: ")
 			fmt.Scanf("%s\n", &user.Name)
@@ -73,27 +71,19 @@ func Client() {
 			// Hasheamos contraseña
 			password := hashPass(user.Password)
 
-			// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
-			if CheckIfExists(user.Name) == true {
-				// Comprobar contraseña
-				if CheckPassword(user.Name, password) && !checked {
-					fmt.Println("Login correcto")
-					checked = true
-				} else {
-					fmt.Println("Contraseña incorrecta")
-				}
-			} else {
-				fmt.Println("No estás registrado, ¿deseas hacerlo? [Y] [N]")
-				fmt.Scanf("%s\n", &register)
+			// Estructura con los valores a enviar en la peticion POST
+			data := url.Values{}
+			data.Set("username", user.Name)
+			data.Set("password", password) // password (string) con hash y base64
 
-				if register == "Y" {
-					command = "register"
-					register = ""
-				} else if register == "N" {
-					fmt.Println("Saliendo del sistema")
-					command = "exit"
-				}
+			// Registro POST
+			r, err := client.PostForm("https://localhost:10443/login", data)
+			chk(err)
+			if err == nil {
+				checked = true
 			}
+			io.Copy(os.Stdout, r.Body)
+
 		// Registrar usuario
 		case "register":
 			fmt.Printf("Username: ")
@@ -119,20 +109,49 @@ func Client() {
 			command = ""
 		// Mostrar lista de ficheros del usuario
 		case "list":
-			r, err := client.Get("https://localhost:10443/files/" + user.Name)
+			r, err := client.Get("https://localhost:10443/list?user=" + user.Name)
+			chk(err)
+			//io.Copy(os.Stdout, r.Body)
+
+			bodyBytes, err := ioutil.ReadAll(r.Body)
 			chk(err)
 
-			responseData, err := ioutil.ReadAll(r.Body)
+			var ficheros Files
 
-			var responseObject []file
-			json.Unmarshal(responseData, &responseObject)
+			error := json.Unmarshal(bodyBytes, &ficheros)
+			chk(error)
 
-			for i := 0; i < len(responseObject); i++ {
-				fmt.Print("[")
-				fmt.Print(i)
-				fmt.Print("] - ")
-				fmt.Println(responseObject[i].Name)
+			fmt.Println("FILES")
+			for _, f := range ficheros.Files {
+				fmt.Print("Name: ")
+				fmt.Println(f.Name)
+
+				fmt.Print("  - Size: ")
+				fmt.Println(f.Size)
+
+				fmt.Print("  - Time: ")
+				fmt.Println(f.Time)
 			}
+
+		case "upload":
+			var filename string
+
+			// Elegir archivo a subir
+			fmt.Printf("Filename: ")
+			fmt.Scanf("%s\n", &filename)
+
+			data := url.Values{}
+			data.Set("username", user.Name)
+			data.Set("filename", filename) // password (string) con hash y base64
+
+			// Registro POST
+			r, err := client.PostForm("https://localhost:10443/upload", data)
+			chk(err)
+			if err == nil {
+				checked = true
+			}
+			io.Copy(os.Stdout, r.Body)
+
 		// Desconectar usuario
 		case "logout":
 			if checked {
@@ -142,6 +161,9 @@ func Client() {
 				break
 			}
 
+		// Salir del programa
+		case "exit":
+			break
 		default:
 			fmt.Println("Comando inválido")
 		}

@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -21,8 +22,9 @@ import (
 
 //User struct del usuario
 type User struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
+	Name      string `json:"name"`
+	Password  string `json:"password"`
+	UserFiles Files  `json:"files"`
 }
 
 //Chk función para comprobar errores (ahorra escritura)
@@ -38,20 +40,28 @@ type resp struct {
 	Msg string // mensaje adicional
 }
 
-type file struct {
-	Name string
-	Size int64
+// Files struct array de ficheros
+type Files struct {
+	Files []File `json:"files"`
+}
+
+// File struct fichero
+type File struct {
+	ID   int       `json:"id"`
+	Name string    `json:"file"`
+	Size int64     `json:"size"`
+	Time time.Time `json:"time"`
 }
 
 // función para escribir una respuesta del servidor
-func response(w io.Writer, ok bool, msg string) {
-	r := resp{Ok: ok, Msg: msg}    // formateamos respuesta
+func response(w io.Writer, msg string) {
+	r := msg                       // formateamos respuesta
 	rJSON, err := json.Marshal(&r) // codificamos en JSON
 	chk(err)                       // comprobamos error
 	w.Write(rJSON)                 // escribimos el JSON resultante
 }
 
-func responseFiles(w io.Writer, fichero map[int]file) {
+func responseFiles(w io.Writer, fichero map[int]File) {
 	rJSON, err := json.Marshal(&fichero) // codificamos en JSON
 	chk(err)                             // comprobamos error
 	w.Write(rJSON)                       // escribimos el JSON resultante
@@ -71,11 +81,9 @@ func Server() {
 
 	// Endpoints de la aplicacion
 	mux.Handle("/register", http.HandlerFunc(register))
-	//mux.Handle("/logout", http.HandlerFunc(register))
-	//mux.Handle("/", http.HandlerFunc(handler))
-	//mux.Handle("/login", http.HandlerFunc(handler))
-	//mux.Handle("/listFile", http.HandlerFunc(handlerPrueba))
-	//mux.Handle("/uploadFile", http.HandlerFunc(handlerPrueba))
+	mux.Handle("/login", http.HandlerFunc(login))
+	mux.Handle("/list", http.HandlerFunc(list))
+	mux.Handle("/upload", http.HandlerFunc(upload))
 	//mux.Handle("/downloadFile", http.HandlerFunc(handlerPrueba))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
@@ -97,6 +105,9 @@ func Server() {
 	log.Println("Servidor detenido correctamente")
 }
 
+/*
+*	MANEJADORES
+ */
 func register(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
@@ -109,6 +120,7 @@ func register(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("Registrado correctamente"))
 }
 
+// Autenticacion
 func login(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
@@ -116,28 +128,101 @@ func login(w http.ResponseWriter, req *http.Request) {
 	var user = req.Form.Get("username")
 	var pass = req.Form.Get("password")
 
-	switch req.Form.Get("cmd") { // comprobamos comando desde el cliente
-	case "save":
-		saveUser(user, pass)
-	case "logout":
-		fmt.Println("Desconectando...")
-		break
-	case "read":
-		readUsers()
-	case "list":
-		files := listFiles(user)
+	// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
+	if checkIfExists(user) == true {
+		// Comprobar contraseña
+		if checkPassword(user, pass) {
+			fmt.Println("Login correcto")
+		} else {
+			fmt.Println("Contraseña incorrecta")
+		}
+	}
+}
 
-		responseFiles(w, files)
+// Lista de archivos del usuario y actualiza el usuario en bd
+func list(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-		//uploadFiles(user)
-	case "exit":
-		fmt.Println("Saliendo...")
-		break
-	default:
-		response(w, false, "Comando inválido")
+	fmt.Println("LISTANDO FICHEROS")
+
+	user := req.URL.Query().Get("user")
+
+	files := listFiles(user)
+
+	for i := range files.Files {
+		fmt.Print("Name: ")
+		fmt.Println(files.Files[i].Name)
+		fmt.Print(" - ID: ")
+		fmt.Println(files.Files[i].ID)
+		fmt.Print(" - Size: ")
+		fmt.Println(files.Files[i].Size)
+		fmt.Print(" - Time: ")
+		fmt.Println(files.Files[i].Time)
+	}
+
+	// Escribir info en JSON
+
+	gUsers := make(map[string]User)
+	loadMap(gUsers)
+
+	// Obtenemos usuarios
+	users := readUsers()
+	var userActual User
+
+	// Obtenemos usuario actual y guardamos los ficheros
+	for _, u := range users {
+		if u.Name == user {
+			userActual = u
+		}
+	}
+
+	userActual.UserFiles.Files = files.Files
+
+	// Almacenamos el usuario
+	gUsers[userActual.Name] = userActual
+
+	// Serializamos el mapa
+	jsonString, err := json.Marshal(gUsers)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Guardamos el mapa serializado en formato JSON
+	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
+	chk(err)
+
+	aux, _ := json.Marshal(files)
+	w.Write(aux)
+}
+
+func upload(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()                              // es necesario parsear el formulario
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+
+	var user = req.Form.Get("username")
+	var filename = req.Form.Get("filename")
+
+	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
+	file, err := ioutil.ReadFile("./" + filename)
+	chk(err)
+
+	// Encriptamos el fichero
+	keyClient := sha512.Sum512([]byte(filename))
+	keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
+	fichero := encrypt(file, keyData)
+
+	err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
+	if err == nil {
+		fmt.Println("Archivo encriptado subido correctamente")
+	} else {
+		fmt.Println(err)
 	}
 
 }
+
+/*
+*	FUNCIONES
+ */
 
 // función para codificar de []bytes a string (Base64)
 func encode64(data []byte) string {
@@ -183,27 +268,15 @@ func loadMap(gUsers map[string]User) bool {
 	return true
 }
 
-func (u User) toString() string {
-	bytes, err := json.Marshal(u)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	return string(bytes)
-}
-
-// readUsers Funcion para leer los usuarios desde el archivo db.json
-func readUsers() {
+// readUsers Funcion para leer los usuarios desde el archivo db.json. Devuelve mapa de usuarios
+func readUsers() map[string]User {
 	users := make(map[string]User)
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	json.Unmarshal(raw, &users)
-
-	for _, us := range users {
-		fmt.Println(us.toString())
-	}
+	return users
 }
 
 // saveUser Guarda el usuario y la contraseña cifrados
@@ -253,8 +326,8 @@ func saveUser(username string, password string) {
 	chk(err)
 }
 
-// CheckIfExists Comprueba si el usuario ya existe en la bbdd
-func CheckIfExists(user string) bool {
+// checkIfExists Comprueba si el usuario ya existe en la bbdd
+func checkIfExists(user string) bool {
 	users := make(map[string]User)
 
 	raw, err := ioutil.ReadFile("./db/db.json")
@@ -273,8 +346,8 @@ func CheckIfExists(user string) bool {
 	return false
 }
 
-// CheckPassword comprueba si la contraseña es correcta
-func CheckPassword(user string, password string) bool {
+// checkPassword comprueba si la contraseña es correcta
+func checkPassword(user string, password string) bool {
 
 	var correct = false
 	users := make(map[string]User)
@@ -297,10 +370,10 @@ func CheckPassword(user string, password string) bool {
 	return correct
 }
 
-func listFiles(user string) map[int]file {
+func listFiles(user string) Files {
 
 	// Creo un mapa de ficheros
-	gFiles := make(map[int]file)
+	var gFiles Files
 
 	files, err := ioutil.ReadDir("./files/" + user)
 	if err != nil {
@@ -309,36 +382,11 @@ func listFiles(user string) map[int]file {
 
 	// Guardo la información
 	for i, f := range files {
-
 		// Creo un archivo
-		var archivo = file{Name: f.Name(), Size: f.Size()}
-		gFiles[i] = archivo
-	}
+		var archivo = File{ID: i, Name: f.Name(), Size: f.Size(), Time: time.Now()}
 
-	fmt.Println(gFiles)
+		gFiles.Files = append(gFiles.Files, archivo)
+	}
 
 	return gFiles
-}
-
-func uploadFiles(user string) bool {
-
-	return false
-}
-
-func handlerPrueba(w http.ResponseWriter, req *http.Request) {
-	req.ParseForm()                              // es necesario parsear el formulario
-	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
-
-	var user = req.Form.Get("username")
-
-	files := listFiles(user)
-
-	for i := range files {
-		fmt.Print("Name: ")
-		fmt.Print(files[i].Name)
-		fmt.Print(" - Size: ")
-		fmt.Println(files[i].Size)
-	}
-
-	json.NewEncoder(w).Encode(files)
 }
