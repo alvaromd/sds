@@ -25,16 +25,6 @@ type User struct {
 	Password string `json:"password"`
 }
 
-// JwtToken struct para el token de autenticacion del usuario
-type JwtToken struct {
-	Token string `json:"token"`
-}
-
-// Exception mensaje de excepcion
-type Exception struct {
-	Message string `json:"message"`
-}
-
 //Chk función para comprobar errores (ahorra escritura)
 func chk(e error) {
 	if e != nil {
@@ -67,10 +57,6 @@ func responseFiles(w io.Writer, fichero map[int]file) {
 	w.Write(rJSON)                       // escribimos el JSON resultante
 }
 
-func CreateTokenEndpoint(w http.ResponseWriter, req *http.Request) {}
-
-func ProtectedEndpoint(w http.ResponseWriter, req *http.Request) {}
-
 /***
 SERVIDOR
 ***/
@@ -84,8 +70,13 @@ func Server() {
 	mux := http.NewServeMux()
 
 	// Endpoints de la aplicacion
-	mux.Handle("/", http.HandlerFunc(handler))
-	mux.Handle("/prueba", http.HandlerFunc(handlerPrueba))
+	mux.Handle("/register", http.HandlerFunc(register))
+	//mux.Handle("/logout", http.HandlerFunc(register))
+	//mux.Handle("/", http.HandlerFunc(handler))
+	//mux.Handle("/login", http.HandlerFunc(handler))
+	//mux.Handle("/listFile", http.HandlerFunc(handlerPrueba))
+	//mux.Handle("/uploadFile", http.HandlerFunc(handlerPrueba))
+	//mux.Handle("/downloadFile", http.HandlerFunc(handlerPrueba))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -106,7 +97,19 @@ func Server() {
 	log.Println("Servidor detenido correctamente")
 }
 
-func handler(w http.ResponseWriter, req *http.Request) {
+func register(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()                              // es necesario parsear el formulario
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+
+	var user = req.Form.Get("username")
+	var pass = req.Form.Get("password")
+
+	saveUser(user, pass)
+
+	w.Write([]byte("Registrado correctamente"))
+}
+
+func login(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
@@ -114,8 +117,6 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	var pass = req.Form.Get("password")
 
 	switch req.Form.Get("cmd") { // comprobamos comando desde el cliente
-	case "hola": // ** registro
-		response(w, true, "Hola "+req.Form.Get("mensaje"))
 	case "save":
 		saveUser(user, pass)
 	case "logout":
@@ -208,16 +209,20 @@ func readUsers() {
 // saveUser Guarda el usuario y la contraseña cifrados
 func saveUser(username string, password string) {
 
-	var masterKey string
 	gUsers := make(map[string]User)
 
+	//var masterKey string
 	// la primera vez pedimos una clave maestra
-	if !loadMap(gUsers) {
-		fmt.Print("Enter master key (first time): ")
-	} else {
-		fmt.Print("Enter master key: ")
-	}
-	fmt.Scanf("%s \n", &masterKey)
+	/*
+		if !loadMap(gUsers) {
+			fmt.Print("Enter master key (first time): ")
+		} else {
+			fmt.Print("Enter master key: ")
+		}
+		fmt.Scanf("%s \n", &masterKey)
+	*/
+
+	loadMap(gUsers)
 
 	var newUser User
 	newUser.Name = username
@@ -282,9 +287,7 @@ func CheckPassword(user string, password string) bool {
 	json.Unmarshal(raw, &users)
 
 	for us := range users {
-		var name = users[us].Name
-
-		if name == user {
+		if user == users[us].Name {
 			if bcrypt.CompareHashAndPassword(decode64(users[us].Password), []byte(password)) == nil {
 				correct = true
 			}
@@ -323,18 +326,19 @@ func uploadFiles(user string) bool {
 }
 
 func handlerPrueba(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-	f := []file{
-		file{
-			Name: "ejemplo1.txt", Size: 16,
-		},
-		file{
-			Name: "ejemplo2.txt", Size: 5,
-		},
+	var user = req.Form.Get("username")
+
+	files := listFiles(user)
+
+	for i := range files {
+		fmt.Print("Name: ")
+		fmt.Print(files[i].Name)
+		fmt.Print(" - Size: ")
+		fmt.Println(files[i].Size)
 	}
 
-	json.NewEncoder(w).Encode(f)
-
-	//w.Write(rJSON)
+	json.NewEncoder(w).Encode(files)
 }
