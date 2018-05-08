@@ -160,8 +160,13 @@ func list(w http.ResponseWriter, req *http.Request) {
 		fmt.Println(files.Files[i].Time)
 	}
 
-	// Escribir info en JSON
+	ficheros, _ := json.Marshal(files)
 
+	w.Write(ficheros)
+}
+
+// Funcion auxiliar para añadir la info de un fichero a la bd
+func addFileToBD(file File, user string) {
 	gUsers := make(map[string]User)
 	loadMap(gUsers)
 
@@ -176,7 +181,7 @@ func list(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	userActual.UserFiles.Files = files.Files
+	userActual.UserFiles.Files = append(userActual.UserFiles.Files, file)
 
 	// Almacenamos el usuario
 	gUsers[userActual.Name] = userActual
@@ -190,9 +195,6 @@ func list(w http.ResponseWriter, req *http.Request) {
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
 	chk(err)
-
-	aux, _ := json.Marshal(files)
-	w.Write(aux)
 }
 
 func upload(w http.ResponseWriter, req *http.Request) {
@@ -206,18 +208,27 @@ func upload(w http.ResponseWriter, req *http.Request) {
 	file, err := ioutil.ReadFile("./" + filename)
 	chk(err)
 
+	// Contamos archivos actuales en bd y guardamos contador
+	files := listFiles(user)
+	contador := len(files.Files)
+
 	// Encriptamos el fichero
 	keyClient := sha512.Sum512([]byte(filename))
 	keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
 	fichero := encrypt(file, keyData)
 
+	// Creamos el fichero a añadir para ponerle id y timestamp
+	var archivoAñadir = File{ID: contador + 1, Name: filename, Size: int64(len(file)), Time: time.Now()}
+
 	err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
 	if err == nil {
-		fmt.Println("Archivo encriptado subido correctamente")
+		fmt.Println("Archivo " + filename + " subido correctamente")
 	} else {
 		fmt.Println(err)
 	}
 
+	// Guardamos la info del fichero en BD
+	addFileToBD(archivoAñadir, user)
 }
 
 /*
