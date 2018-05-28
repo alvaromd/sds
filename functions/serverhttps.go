@@ -23,7 +23,7 @@ import (
 type User struct {
 	Name      string `json:"name"`
 	Password  string `json:"password"`
-	Key       string `json: "key`
+	Key       string `json:"key"`
 	UserFiles Files  `json:"files"`
 }
 
