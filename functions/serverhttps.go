@@ -34,7 +34,7 @@ func chk(e error) {
 	}
 }
 
-// respuesta del servidor
+// Respuesta del servidor
 type resp struct {
 	Ok  bool   // true -> correcto, false -> error
 	Msg string // mensaje adicional
