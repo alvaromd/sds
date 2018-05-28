@@ -46,7 +46,7 @@ func Client() {
 
 		if command != "register" {
 			if checked {
-				fmt.Printf("Options: | list | upload | logout | exit |")
+				fmt.Printf("Options: | list | upload | download | logout | exit |")
 			} else {
 				fmt.Printf("Options: | login | register | exit |")
 			}
@@ -146,6 +146,25 @@ func Client() {
 
 			// Registro POST
 			r, err := client.PostForm("https://localhost:10443/upload", data)
+			chk(err)
+			if err == nil {
+				checked = true
+			}
+			io.Copy(os.Stdout, r.Body)
+
+		case "download":
+			var filename string
+
+			// Elegir archivo a descargar
+			fmt.Printf("Filename: ")
+			fmt.Scanf("%s\n", &filename)
+
+			data := url.Values{}
+			data.Set("username", user.Name)
+			data.Set("filename", filename) // password (string) con hash y base64
+
+			// Registro POST
+			r, err := client.PostForm("https://localhost:10443/download", data)
 			chk(err)
 			if err == nil {
 				checked = true

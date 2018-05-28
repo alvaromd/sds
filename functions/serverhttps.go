@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -24,6 +23,7 @@ import (
 type User struct {
 	Name      string `json:"name"`
 	Password  string `json:"password"`
+	Key       string `json: "key`
 	UserFiles Files  `json:"files"`
 }
 
@@ -84,6 +84,8 @@ func Server() {
 	mux.Handle("/login", http.HandlerFunc(login))
 	mux.Handle("/list", http.HandlerFunc(list))
 	mux.Handle("/upload", http.HandlerFunc(upload))
+	mux.Handle("/download", http.HandlerFunc(download))
+
 	//mux.Handle("/downloadFile", http.HandlerFunc(handlerPrueba))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
@@ -197,6 +199,7 @@ func addFileToBD(file File, user string) {
 	chk(err)
 }
 
+// Funcion para subir archivo
 func upload(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
@@ -213,8 +216,11 @@ func upload(w http.ResponseWriter, req *http.Request) {
 	contador := len(files.Files)
 
 	// Encriptamos el fichero
-	keyClient := sha512.Sum512([]byte(filename))
-	keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
+	//keyClient := sha512.Sum512([]byte(filename))
+	//keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
+
+	// Obtenemos la key del usuario y la usamos para cifrar el fichero
+	keyData := decode64(getUserKey(user))
 	fichero := encrypt(file, keyData)
 
 	// Creamos el fichero a añadir para ponerle id y timestamp
@@ -229,6 +235,30 @@ func upload(w http.ResponseWriter, req *http.Request) {
 
 	// Guardamos la info del fichero en BD
 	addFileToBD(archivoAñadir, user)
+}
+
+// Funcion para subir archivo
+func download(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()                              // es necesario parsear el formulario
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+
+	var user = req.Form.Get("username")
+	var filename = req.Form.Get("filename")
+
+	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
+	file, err := ioutil.ReadFile("./files/" + user + "/" + filename)
+	chk(err)
+
+	// Obtenemos la key del usuario y la usamos para descifrar el fichero
+	keyData := decode64(getUserKey(user))
+	fichero := decrypt(file, keyData)
+
+	err = ioutil.WriteFile("./downloads/Descarga_"+filename, fichero, 0644)
+	if err == nil {
+		fmt.Println("Archivo " + filename + " descargado correctamente")
+	} else {
+		fmt.Println(err)
+	}
 }
 
 /*
@@ -247,7 +277,7 @@ func decode64(s string) []byte {
 	return b                                     // devolvemos los datos originales
 }
 
-// función para cifrar (con AES en este caso), adjunta el IV al principio
+// Cifrar (con AES en este caso), adjunta el IV al principio
 func encrypt(data, key []byte) (out []byte) {
 	out = make([]byte, len(data)+16)    // reservamos espacio para el IV al principio
 	rand.Read(out[:16])                 // generamos el IV
@@ -258,7 +288,7 @@ func encrypt(data, key []byte) (out []byte) {
 	return
 }
 
-// función para descifrar (con AES en este caso)
+// Descifrar (con AES en este caso)
 func decrypt(data, key []byte) (out []byte) {
 	out = make([]byte, len(data)-16)     // la salida no va a tener el IV
 	blk, err := aes.NewCipher(key)       // cifrador en bloque (AES), usa key
@@ -268,7 +298,7 @@ func decrypt(data, key []byte) (out []byte) {
 	return
 }
 
-// Funcion para cargar base de datos
+// Cargar base de datos
 func loadMap(gUsers map[string]User) bool {
 	raw, err := ioutil.ReadFile("./db/db.json")
 	if err != nil {
@@ -279,7 +309,7 @@ func loadMap(gUsers map[string]User) bool {
 	return true
 }
 
-// readUsers Funcion para leer los usuarios desde el archivo db.json. Devuelve mapa de usuarios
+// Lee los usuarios desde el archivo db.json. Devuelve mapa de usuarios
 func readUsers() map[string]User {
 	users := make(map[string]User)
 	raw, err := ioutil.ReadFile("./db/db.json")
@@ -290,7 +320,7 @@ func readUsers() map[string]User {
 	return users
 }
 
-// saveUser Guarda el usuario y la contraseña cifrados
+// Guarda el usuario y la contraseña cifrados
 func saveUser(username string, password string) {
 
 	gUsers := make(map[string]User)
@@ -320,6 +350,17 @@ func saveUser(username string, password string) {
 	// Guardo hash como pass del objeto User
 	newUser.Password = encode64(passHash)
 
+	// Generamos clave aleatoria para cifrado y descifrado
+	key := make([]byte, 32)
+
+	_, err = rand.Read(key)
+	if err != nil {
+		panic(err)
+	}
+
+	// Guardamos la clave
+	newUser.Key = encode64(key)
+
 	// Almacenamos el usuario
 	gUsers[newUser.Name] = newUser
 
@@ -337,7 +378,7 @@ func saveUser(username string, password string) {
 	chk(err)
 }
 
-// checkIfExists Comprueba si el usuario ya existe en la bbdd
+// Comprueba si el usuario ya existe en la bbdd
 func checkIfExists(user string) bool {
 	users := make(map[string]User)
 
@@ -357,7 +398,7 @@ func checkIfExists(user string) bool {
 	return false
 }
 
-// checkPassword comprueba si la contraseña es correcta
+// Comprueba si la contraseña es correcta
 func checkPassword(user string, password string) bool {
 
 	var correct = false
@@ -379,6 +420,27 @@ func checkPassword(user string, password string) bool {
 	}
 
 	return correct
+}
+
+// Comprueba si el usuario ya existe en la bbdd
+func getUserKey(user string) string {
+	users := make(map[string]User)
+
+	raw, err := ioutil.ReadFile("./db/db.json")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	json.Unmarshal(raw, &users)
+
+	for us := range users {
+		var name = users[us].Name
+		if name == user {
+			return users[us].Key
+		}
+	}
+
+	// Si falla, devuelve el nombre del usuario
+	return user
 }
 
 func listFiles(user string) Files {
