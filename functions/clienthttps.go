@@ -28,8 +28,7 @@ func hashPass(password string) string {
 
 // Client Gestiona el modo cliente
 func Client() {
-
-	/* creamos un cliente especial que no comprueba la validez de los certificados
+	/* Creamos un cliente especial que no comprueba la validez de los certificados
 	esto es necesario por que usamos certificados autofirmados (para pruebas) */
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -79,10 +78,20 @@ func Client() {
 			// Registro POST
 			r, err := client.PostForm("https://localhost:10443/login", data)
 			chk(err)
-			if err == nil {
+
+			message, _ := ioutil.ReadAll(r.Body)
+			var respuesta resp
+
+			json.Unmarshal(message, &respuesta)
+
+			if respuesta.Ok {
 				checked = true
+			} else {
+				checked = false
 			}
-			io.Copy(os.Stdout, r.Body)
+			fmt.Println(respuesta.Msg)
+
+			// r.Header.Get("Status") para coger campos del header
 
 		// Registrar usuario
 		case "register":
@@ -147,8 +156,8 @@ func Client() {
 			// Registro POST
 			r, err := client.PostForm("https://localhost:10443/upload", data)
 			chk(err)
-			if err == nil {
-				checked = true
+			if err != nil {
+				panic(err)
 			}
 			io.Copy(os.Stdout, r.Body)
 
@@ -182,9 +191,10 @@ func Client() {
 
 		// Salir del programa
 		case "exit":
+			fmt.Println("Exiting...")
 			break
 		default:
-			fmt.Println("Comando inválido")
+			fmt.Println("Invalid command")
 		}
 
 		fmt.Println()

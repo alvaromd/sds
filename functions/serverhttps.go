@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/goinggo/tracelog"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -54,8 +55,8 @@ type File struct {
 }
 
 // función para escribir una respuesta del servidor
-func response(w io.Writer, msg string) {
-	r := msg                       // formateamos respuesta
+func response(w io.Writer, ok bool, msg string) {
+	r := resp{Ok: ok, Msg: msg}    // formateamos respuesta
 	rJSON, err := json.Marshal(&r) // codificamos en JSON
 	chk(err)                       // comprobamos error
 	w.Write(rJSON)                 // escribimos el JSON resultante
@@ -79,14 +80,15 @@ func Server() {
 
 	mux := http.NewServeMux()
 
+	// Iniciamos el logger
+	tracelog.StartFile(1, "log/log-server", 30)
+
 	// Endpoints de la aplicacion
 	mux.Handle("/register", http.HandlerFunc(register))
 	mux.Handle("/login", http.HandlerFunc(login))
 	mux.Handle("/list", http.HandlerFunc(list))
 	mux.Handle("/upload", http.HandlerFunc(upload))
 	mux.Handle("/download", http.HandlerFunc(download))
-
-	//mux.Handle("/downloadFile", http.HandlerFunc(handlerPrueba))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -97,14 +99,14 @@ func Server() {
 	}()
 
 	<-stopChan // espera señal SIGINT
-	log.Println("Apagando servidor ...")
+	log.Println("Turning off server...")
 
 	// apagar servidor de forma segura
 	ctx, fnc := context.WithTimeout(context.Background(), 5*time.Second)
 	fnc()
 	srv.Shutdown(ctx)
 
-	log.Println("Servidor detenido correctamente")
+	log.Println("Server stopped successfully")
 }
 
 /*
@@ -119,7 +121,7 @@ func register(w http.ResponseWriter, req *http.Request) {
 
 	saveUser(user, pass)
 
-	w.Write([]byte("Registrado correctamente"))
+	w.Write([]byte("Registered successfully"))
 }
 
 // Autenticacion
@@ -134,18 +136,24 @@ func login(w http.ResponseWriter, req *http.Request) {
 	if checkIfExists(user) == true {
 		// Comprobar contraseña
 		if checkPassword(user, pass) {
-			fmt.Println("Login correcto")
+			tracelog.Trace("server", "login", "Successful login")
+			response(w, true, "Successful login")
 		} else {
-			fmt.Println("Contraseña incorrecta")
+			tracelog.Trace("server", "login", "Wrong password")
+			response(w, false, "Wrong password")
 		}
+	} else {
+		tracelog.Trace("server", "login", "Wrong username")
+		response(w, false, "Wrong username")
 	}
+
 }
 
 // Lista de archivos del usuario y actualiza el usuario en bd
 func list(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-	fmt.Println("LISTANDO FICHEROS")
+	fmt.Println("LISTING FILES")
 
 	user := req.URL.Query().Get("user")
 
@@ -228,7 +236,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 
 	err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
 	if err == nil {
-		fmt.Println("Archivo " + filename + " subido correctamente")
+		fmt.Println("File " + filename + " uploaded")
 	} else {
 		fmt.Println(err)
 	}
@@ -255,7 +263,7 @@ func download(w http.ResponseWriter, req *http.Request) {
 
 	err = ioutil.WriteFile("./downloads/Descarga_"+filename, fichero, 0644)
 	if err == nil {
-		fmt.Println("Archivo " + filename + " descargado correctamente")
+		fmt.Println("File " + filename + " downloaded")
 	} else {
 		fmt.Println(err)
 	}
