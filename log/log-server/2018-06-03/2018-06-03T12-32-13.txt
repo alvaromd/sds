@@ -1,0 +1,6 @@
+TRACE: 2018/06/03 14:32:13 tracelog.go:285: main : LogDirectoryCleanup : Started : BaseFilePath[log/log-server] DaysToKeep[30]
+TRACE: 2018/06/03 14:32:13 tracelog.go:298: main : LogDirectoryCleanup : Info : CompareDate[2018-05-04 00:00:00 +0000 UTC]
+TRACE: 2018/06/03 14:32:13 tracelog.go:335: main : LogDirectoryCleanup : Info : Checking Directory[log/log-server/2018-06-03] DaysOld[-30]
+TRACE: 2018/06/03 14:32:13 tracelog.go:353: main : LogDirectoryCleanup : Completed
+TRACE: 2018/06/03 14:32:23 serverhttps.go:210: server : createTokenEndpoint : Info : Successful login
+TRACE: 2018/06/03 14:32:23 serverhttps.go:246: server : login : Info : Successful login

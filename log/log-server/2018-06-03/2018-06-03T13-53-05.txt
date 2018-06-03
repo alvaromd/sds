@@ -1,0 +1,5 @@
+TRACE: 2018/06/03 15:53:05 tracelog.go:285: main : LogDirectoryCleanup : Started : BaseFilePath[log/log-server] DaysToKeep[30]
+TRACE: 2018/06/03 15:53:05 tracelog.go:298: main : LogDirectoryCleanup : Info : CompareDate[2018-05-04 00:00:00 +0000 UTC]
+TRACE: 2018/06/03 15:53:05 tracelog.go:335: main : LogDirectoryCleanup : Info : Checking Directory[log/log-server/2018-06-03] DaysOld[-30]
+TRACE: 2018/06/03 15:53:05 tracelog.go:353: main : LogDirectoryCleanup : Completed
+TRACE: 2018/06/03 15:53:11 serverhttps.go:231: server : createTokenEndpoint : Info : Wrong username

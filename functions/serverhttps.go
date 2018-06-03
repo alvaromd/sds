@@ -14,13 +14,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/goinggo/tracelog"
+	"github.com/mitchellh/mapstructure"
 	"golang.org/x/crypto/bcrypt"
 )
 
-//User struct del usuario
+const (
+	secretKey = "sds2018alvaroproject"
+)
+
+//User struct for username
 type User struct {
 	Name      string `json:"name"`
 	Password  string `json:"password"`
@@ -28,7 +35,17 @@ type User struct {
 	UserFiles Files  `json:"files"`
 }
 
-//Chk función para comprobar errores (ahorra escritura)
+// JwtToken struct para el token jwt
+type JwtToken struct {
+	Token string `json:"token"`
+}
+
+// Exception exception for jwt token
+type Exception struct {
+	Message string `json:"message"`
+}
+
+// Chk function to check errors (saves lines of code)
 func chk(e error) {
 	if e != nil {
 		panic(e)
@@ -39,6 +56,13 @@ func chk(e error) {
 type resp struct {
 	Ok  bool   // true -> correcto, false -> error
 	Msg string // mensaje adicional
+}
+
+// Respuesta del servidor
+type respToken struct {
+	Ok    bool   `json:"ok"`
+	Msg   string `json:"msg"`
+	Token string `json:"token"`
 }
 
 // Files struct array de ficheros
@@ -68,6 +92,13 @@ func responseFiles(w io.Writer, fichero map[int]File) {
 	w.Write(rJSON)                       // escribimos el JSON resultante
 }
 
+func responseToken(w io.Writer, ok bool, msg string, token string) {
+	r := respToken{Ok: ok, Msg: msg, Token: token}
+	rJSON, err := json.Marshal(&r)
+	chk(err)
+	w.Write(rJSON)
+}
+
 /***
 SERVIDOR
 ***/
@@ -85,10 +116,13 @@ func Server() {
 
 	// Endpoints de la aplicacion
 	mux.Handle("/register", http.HandlerFunc(register))
-	mux.Handle("/login", http.HandlerFunc(login))
+	mux.Handle("/login", http.HandlerFunc(loginWithToken))
 	mux.Handle("/list", http.HandlerFunc(list))
 	mux.Handle("/upload", http.HandlerFunc(upload))
 	mux.Handle("/download", http.HandlerFunc(download))
+
+	//mux.Handle("/token", http.HandlerFunc(createTokenEndpoint))
+	mux.Handle("/test", http.HandlerFunc(validateMiddleware(testEndpoint)))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -112,6 +146,93 @@ func Server() {
 /*
 *	MANEJADORES
  */
+
+func testEndpoint(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte("Funciona"))
+}
+
+func validateMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		authorizationHeader := req.Header.Get("Authorization")
+		fmt.Println(authorizationHeader)
+		if authorizationHeader != "" {
+			bearerToken := strings.Split(authorizationHeader, " ")
+			if len(bearerToken) == 2 {
+				token, error := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, fmt.Errorf("There was an error")
+					}
+					return []byte(secretKey), nil
+				})
+				if error != nil {
+					json.NewEncoder(w).Encode(Exception{Message: error.Error()})
+					return
+				}
+				if !token.Valid {
+					json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
+				}
+			}
+		} else {
+			json.NewEncoder(w).Encode(Exception{Message: "An authorization header is required"})
+		}
+	})
+}
+
+func protectedEndpoint(w http.ResponseWriter, req *http.Request) {
+	params := req.URL.Query()
+	token, _ := jwt.Parse(params["token"][0], func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("There was an error")
+		}
+		return []byte(secretKey), nil
+	})
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		var user User
+		mapstructure.Decode(claims, &user)
+		json.NewEncoder(w).Encode(user)
+	} else {
+		json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
+	}
+}
+
+func loginWithToken(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user User
+	_ = json.NewDecoder(req.Body).Decode(&user)
+
+	user.Name = req.Form.Get("username")
+	user.Password = req.Form.Get("password")
+
+	if checkIfExists(user.Name) == true {
+		if checkPassword(user.Name, user.Password) {
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"username": user.Name,
+				"password": user.Password,
+			})
+
+			tokenString, error := token.SignedString([]byte(secretKey))
+			if error != nil {
+				fmt.Println(error)
+			}
+
+			//json.NewEncoder(w).Encode(JwtToken{Token: tokenString})
+			responseToken(w, true, "Login successful", tokenString)
+
+			tracelog.Trace("server", "createTokenEndpoint", "Token created")
+
+		} else {
+			tracelog.Trace("server", "createTokenEndpoint", "Wrong password")
+			response(w, false, "Wrong password")
+		}
+	} else {
+		tracelog.Trace("server", "createTokenEndpoint", "Wrong username")
+		response(w, false, "Wrong username")
+	}
+}
+
 func register(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
@@ -129,13 +250,13 @@ func login(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-	var user = req.Form.Get("username")
-	var pass = req.Form.Get("password")
+	var user User
 
-	// Comprobamos si está registrado. Si lo está accedemos, si no le ofrecemos registrarse
-	if checkIfExists(user) == true {
-		// Comprobar contraseña
-		if checkPassword(user, pass) {
+	user.Name = req.Form.Get("username")
+	user.Password = req.Form.Get("password")
+
+	if checkIfExists(user.Name) == true {
+		if checkPassword(user.Name, user.Password) {
 			tracelog.Trace("server", "login", "Successful login")
 			response(w, true, "Successful login")
 		} else {
@@ -146,7 +267,6 @@ func login(w http.ResponseWriter, req *http.Request) {
 		tracelog.Trace("server", "login", "Wrong username")
 		response(w, false, "Wrong username")
 	}
-
 }
 
 // Lista de archivos del usuario y actualiza el usuario en bd

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +40,8 @@ func Client() {
 	var regUser User
 	var command string
 	var checked bool
+	var responseToken respToken
+	var token string
 
 	// Mientras no elija salir
 	for command != "exit" {
@@ -47,7 +50,7 @@ func Client() {
 			if checked {
 				fmt.Printf("Options: | list | upload | download | logout | exit |")
 			} else {
-				fmt.Printf("Options: | login | register | exit |")
+				fmt.Printf("Options: | register | login | 2fauth | exit |")
 			}
 		}
 
@@ -61,6 +64,7 @@ func Client() {
 		switch command {
 		// Autenticacion
 		case "login":
+
 			fmt.Printf("Username: ")
 			fmt.Scanf("%s\n", &user.Name)
 
@@ -75,23 +79,17 @@ func Client() {
 			data.Set("username", user.Name)
 			data.Set("password", password) // password (string) con hash y base64
 
-			// Registro POST
+			// Token auth
 			r, err := client.PostForm("https://localhost:10443/login", data)
 			chk(err)
 
 			message, _ := ioutil.ReadAll(r.Body)
-			var respuesta resp
+			json.Unmarshal(message, &responseToken)
 
-			json.Unmarshal(message, &respuesta)
+			// Convert JWT struct to string to pass through Query Param
+			token = responseToken.Token
 
-			if respuesta.Ok {
-				checked = true
-			} else {
-				checked = false
-			}
-			fmt.Println(respuesta.Msg)
-
-			// r.Header.Get("Status") para coger campos del header
+			fmt.Println(responseToken.Msg)
 
 		// Registrar usuario
 		case "register":
@@ -193,6 +191,43 @@ func Client() {
 		case "exit":
 			fmt.Println("Exiting...")
 			break
+
+		case "test":
+			url := "https://localhost:10443/test"
+			req, err := http.NewRequest("GET", url, nil)
+			chk(err)
+
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			resp, err := client.Do(req)
+			chk(err)
+
+			content, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Printf("%s", content)
+
+		case "2fauth":
+			url := "https://localhost:10443/test"
+			req, err := http.NewRequest("GET", url, nil)
+			chk(err)
+
+			req.Header.Set("Authorization", "Bearer "+token)
+
+			resp, err := client.Do(req)
+			chk(err)
+
+			content, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Printf("%s", content)
+
 		default:
 			fmt.Println("Invalid command")
 		}
