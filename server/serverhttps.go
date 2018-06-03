@@ -1,4 +1,4 @@
-package functions
+package server
 
 import (
 	"context"
@@ -23,11 +23,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const (
-	secretKey = "sds2018alvaroproject"
-)
-
-//User struct for username
 type User struct {
 	Name      string `json:"name"`
 	Password  string `json:"password"`
@@ -43,13 +38,6 @@ type JwtToken struct {
 // Exception exception for jwt token
 type Exception struct {
 	Message string `json:"message"`
-}
-
-// Chk function to check errors (saves lines of code)
-func chk(e error) {
-	if e != nil {
-		panic(e)
-	}
 }
 
 // Respuesta del servidor
@@ -82,22 +70,33 @@ type File struct {
 func response(w io.Writer, ok bool, msg string) {
 	r := resp{Ok: ok, Msg: msg}    // formateamos respuesta
 	rJSON, err := json.Marshal(&r) // codificamos en JSON
-	chk(err)                       // comprobamos error
+	Chk(err)                       // comprobamos error
 	w.Write(rJSON)                 // escribimos el JSON resultante
 }
 
 func responseFiles(w io.Writer, fichero map[int]File) {
 	rJSON, err := json.Marshal(&fichero) // codificamos en JSON
-	chk(err)                             // comprobamos error
+	Chk(err)                             // comprobamos error
 	w.Write(rJSON)                       // escribimos el JSON resultante
 }
 
 func responseToken(w io.Writer, ok bool, msg string, token string) {
 	r := respToken{Ok: ok, Msg: msg, Token: token}
 	rJSON, err := json.Marshal(&r)
-	chk(err)
+	Chk(err)
 	w.Write(rJSON)
 }
+
+// Chk function to check errors (saves lines of code)
+func Chk(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
+
+const (
+	secretKey = "sds2018alvaroproject"
+)
 
 /***
 SERVIDOR
@@ -218,10 +217,8 @@ func loginWithToken(w http.ResponseWriter, req *http.Request) {
 				fmt.Println(error)
 			}
 
-			//json.NewEncoder(w).Encode(JwtToken{Token: tokenString})
-			responseToken(w, true, "Login successful", tokenString)
-
 			tracelog.Trace("server", "createTokenEndpoint", "Token created")
+			responseToken(w, true, "Login successful", tokenString)
 
 		} else {
 			tracelog.Trace("server", "createTokenEndpoint", "Wrong password")
@@ -324,7 +321,7 @@ func addFileToBD(file File, user string) {
 
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
-	chk(err)
+	Chk(err)
 }
 
 // Funcion para subir archivo
@@ -337,7 +334,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 
 	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
 	file, err := ioutil.ReadFile("./" + filename)
-	chk(err)
+	Chk(err)
 
 	// Contamos archivos actuales en bd y guardamos contador
 	files := listFiles(user)
@@ -375,7 +372,7 @@ func download(w http.ResponseWriter, req *http.Request) {
 
 	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
 	file, err := ioutil.ReadFile("./files/" + user + "/" + filename)
-	chk(err)
+	Chk(err)
 
 	// Obtenemos la key del usuario y la usamos para descifrar el fichero
 	keyData := decode64(getUserKey(user))
@@ -401,7 +398,7 @@ func encode64(data []byte) string {
 // función para decodificar de string a []bytes (Base64)
 func decode64(s string) []byte {
 	b, err := base64.StdEncoding.DecodeString(s) // recupera el formato original
-	chk(err)                                     // comprobamos el error
+	Chk(err)                                     // comprobamos el error
 	return b                                     // devolvemos los datos originales
 }
 
@@ -410,7 +407,7 @@ func encrypt(data, key []byte) (out []byte) {
 	out = make([]byte, len(data)+16)    // reservamos espacio para el IV al principio
 	rand.Read(out[:16])                 // generamos el IV
 	blk, err := aes.NewCipher(key)      // cifrador en bloque (AES), usa key
-	chk(err)                            // comprobamos el error
+	Chk(err)                            // comprobamos el error
 	ctr := cipher.NewCTR(blk, out[:16]) // cifrador en flujo: modo CTR, usa IV
 	ctr.XORKeyStream(out[16:], data)    // ciframos los datos
 	return
@@ -420,7 +417,7 @@ func encrypt(data, key []byte) (out []byte) {
 func decrypt(data, key []byte) (out []byte) {
 	out = make([]byte, len(data)-16)     // la salida no va a tener el IV
 	blk, err := aes.NewCipher(key)       // cifrador en bloque (AES), usa key
-	chk(err)                             // comprobamos el error
+	Chk(err)                             // comprobamos el error
 	ctr := cipher.NewCTR(blk, data[:16]) // cifrador en flujo: modo CTR, usa IV
 	ctr.XORKeyStream(out, data[16:])     // desciframos (doble cifrado) los datos
 	return
@@ -503,7 +500,7 @@ func saveUser(username string, password string) {
 
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
-	chk(err)
+	Chk(err)
 }
 
 // Comprueba si el usuario ya existe en la bbdd

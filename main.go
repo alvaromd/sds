@@ -1,9 +1,10 @@
 package main
 
 import (
+	"client"
 	"fmt"
-	"functions"
 	"os"
+	"server"
 )
 
 func main() {
@@ -13,9 +14,9 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "srv":
-			functions.Server()
+			server.Server()
 		case "cli":
-			functions.Client()
+			client.Client()
 		default:
 			fmt.Println("Invalid command: '", os.Args[1], s)
 		}

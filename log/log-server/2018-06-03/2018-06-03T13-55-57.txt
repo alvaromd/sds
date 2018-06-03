@@ -1,8 +1,0 @@
-TRACE: 2018/06/03 15:55:57 tracelog.go:285: main : LogDirectoryCleanup : Started : BaseFilePath[log/log-server] DaysToKeep[30]
-TRACE: 2018/06/03 15:55:57 tracelog.go:298: main : LogDirectoryCleanup : Info : CompareDate[2018-05-04 00:00:00 +0000 UTC]
-TRACE: 2018/06/03 15:55:57 tracelog.go:335: main : LogDirectoryCleanup : Info : Checking Directory[log/log-server/2018-06-03] DaysOld[-30]
-TRACE: 2018/06/03 15:55:57 tracelog.go:353: main : LogDirectoryCleanup : Completed
-TRACE: 2018/06/03 15:56:18 serverhttps.go:224: server : createTokenEndpoint : Info : Token created
-TRACE: 2018/06/03 15:57:03 serverhttps.go:227: server : createTokenEndpoint : Info : Wrong password
-TRACE: 2018/06/03 15:57:07 serverhttps.go:231: server : createTokenEndpoint : Info : Wrong username
-TRACE: 2018/06/03 15:57:11 serverhttps.go:224: server : createTokenEndpoint : Info : Token created
