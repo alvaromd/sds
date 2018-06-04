@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,21 +19,27 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/dgryski/dgoogauth"
 	"github.com/goinggo/tracelog"
-	"github.com/mitchellh/mapstructure"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	Name      string `json:"name"`
-	Password  string `json:"password"`
-	Key       string `json:"key"`
-	UserFiles Files  `json:"files"`
+	Name         string `json:"name"`
+	Password     string `json:"password"`
+	Key          string `json:"key"`
+	FAuth        string `json:"fauth"`
+	FAuthEnabled bool   `json:"fauthenabled"`
+	UserFiles    Files  `json:"files"`
 }
 
 // JwtToken struct para el token jwt
 type JwtToken struct {
 	Token string `json:"token"`
+}
+
+type OtpToken struct {
+	Token string `json:"otp"`
 }
 
 // Exception exception for jwt token
@@ -60,7 +67,6 @@ type Files struct {
 
 // File struct fichero
 type File struct {
-	ID   int       `json:"id"`
 	Name string    `json:"file"`
 	Size int64     `json:"size"`
 	Time time.Time `json:"time"`
@@ -99,7 +105,7 @@ const (
 )
 
 /***
-SERVIDOR
+SERVER
 ***/
 
 //Server Gestiona el modo servidor
@@ -110,18 +116,24 @@ func Server() {
 
 	mux := http.NewServeMux()
 
-	// Iniciamos el logger
+	// Logger starts
 	tracelog.StartFile(1, "log/log-server", 30)
 
-	// Endpoints de la aplicacion
+	// Endpoints
 	mux.Handle("/register", http.HandlerFunc(register))
 	mux.Handle("/login", http.HandlerFunc(loginWithToken))
-	mux.Handle("/list", http.HandlerFunc(list))
-	mux.Handle("/upload", http.HandlerFunc(upload))
-	mux.Handle("/download", http.HandlerFunc(download))
+	mux.Handle("/list", http.HandlerFunc(ValidateMiddleware(list)))
+	mux.Handle("/upload", http.HandlerFunc(ValidateMiddleware(upload)))
+	mux.Handle("/download", http.HandlerFunc(ValidateMiddleware(download)))
+	mux.Handle("/delete", http.HandlerFunc(ValidateMiddleware(delete)))
 
-	//mux.Handle("/token", http.HandlerFunc(createTokenEndpoint))
-	mux.Handle("/test", http.HandlerFunc(validateMiddleware(testEndpoint)))
+	mux.Handle("/gen-secret", http.HandlerFunc(GenerateSecret))
+	mux.Handle("/2fauth", http.HandlerFunc(VerifyOtpEndpoint))
+	mux.Handle("/getFauth", http.HandlerFunc(getUserFauth))
+
+	mux.Handle("/enableTwoFA", http.HandlerFunc(enableTwoFAEndpoint))
+	mux.Handle("/disableTwoFA", http.HandlerFunc(disableTwoFAEndpoint))
+	mux.Handle("/checkUserFA", http.HandlerFunc(checkFAEnabledEndpoint))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -131,10 +143,10 @@ func Server() {
 		}
 	}()
 
-	<-stopChan // espera señal SIGINT
+	<-stopChan // Waits for SIGINT signal
 	log.Println("Turning off server...")
 
-	// apagar servidor de forma segura
+	// Secure server turn down
 	ctx, fnc := context.WithTimeout(context.Background(), 5*time.Second)
 	fnc()
 	srv.Shutdown(ctx)
@@ -143,56 +155,213 @@ func Server() {
 }
 
 /*
-*	MANEJADORES
+*	HANDLERS
  */
 
-func testEndpoint(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte("Funciona"))
-}
-
-func validateMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func ValidateMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		authorizationHeader := req.Header.Get("Authorization")
-		fmt.Println(authorizationHeader)
-		if authorizationHeader != "" {
-			bearerToken := strings.Split(authorizationHeader, " ")
-			if len(bearerToken) == 2 {
-				token, error := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
-					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-						return nil, fmt.Errorf("There was an error")
-					}
-					return []byte(secretKey), nil
-				})
-				if error != nil {
-					json.NewEncoder(w).Encode(Exception{Message: error.Error()})
-					return
-				}
-				if !token.Valid {
-					json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
-				}
-			}
+		bearerToken, err := GetBearerToken(req.Header.Get("authorization"))
+		if err != nil {
+			json.NewEncoder(w).Encode(err)
+			return
+		}
+		decodedToken, err := VerifyJwt(bearerToken, secretKey)
+		if err != nil {
+			json.NewEncoder(w).Encode(err)
+			return
+		}
+		if decodedToken["authorized"] == true {
+			next(w, req)
 		} else {
-			json.NewEncoder(w).Encode(Exception{Message: "An authorization header is required"})
+			json.NewEncoder(w).Encode("2FA is required")
 		}
 	})
 }
 
-func protectedEndpoint(w http.ResponseWriter, req *http.Request) {
-	params := req.URL.Query()
-	token, _ := jwt.Parse(params["token"][0], func(token *jwt.Token) (interface{}, error) {
+func checkFAEnabledEndpoint(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user = req.Form.Get("username")
+
+	var enabled = checkFAEnabled(user)
+
+	if enabled {
+		response(w, true, "Two-factor auth enabled")
+	} else {
+		response(w, false, "Two-factor auth disabled")
+	}
+}
+
+func enableTwoFAEndpoint(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user = req.Form.Get("username")
+
+	gUsers := make(map[string]User)
+	loadMap(gUsers)
+
+	// Obtenemos usuarios
+	users := readUsers()
+	var userActual User
+
+	// Obtenemos usuario actual
+	for _, u := range users {
+		if u.Name == user {
+			userActual = u
+		}
+	}
+
+	userActual.FAuthEnabled = true
+
+	// Almacenamos el usuario
+	gUsers[userActual.Name] = userActual
+
+	// Serializamos el mapa
+	jsonString, err := json.Marshal(gUsers)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Guardamos el mapa serializado en formato JSON
+	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
+	Chk(err)
+
+	response(w, true, "Two-factor auth enabled")
+}
+
+func disableTwoFAEndpoint(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user = req.Form.Get("username")
+
+	gUsers := make(map[string]User)
+	loadMap(gUsers)
+
+	// Obtenemos usuarios
+	users := readUsers()
+	var userActual User
+
+	// Obtenemos usuario actual
+	for _, u := range users {
+		if u.Name == user {
+			userActual = u
+		}
+	}
+
+	userActual.FAuthEnabled = false
+
+	// Almacenamos el usuario
+	gUsers[userActual.Name] = userActual
+
+	// Serializamos el mapa
+	jsonString, err := json.Marshal(gUsers)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// Guardamos el mapa serializado en formato JSON
+	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
+	Chk(err)
+
+	response(w, userActual.FAuthEnabled, "Two-factor auth disabled")
+}
+
+func getUserFauth(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user = req.Form.Get("username")
+
+	users := make(map[string]User)
+
+	raw, err := ioutil.ReadFile("./db/db.json")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	json.Unmarshal(raw, &users)
+
+	resp := "Error getting user key"
+
+	for us := range users {
+		var name = users[us].Name
+		if name == user {
+			resp = users[us].FAuth
+		}
+	}
+
+	response(w, true, resp)
+}
+
+func VerifyOtpEndpoint(w http.ResponseWriter, req *http.Request) {
+	var secret = req.Header.Get("secret")
+	var otpToken = req.Header.Get("otpToken")
+
+	bearerToken, err := GetBearerToken(req.Header.Get("authorization"))
+	if err != nil {
+		json.NewEncoder(w).Encode(err)
+		return
+	}
+	decodedToken, err := VerifyJwt(bearerToken, secretKey)
+	if err != nil {
+		json.NewEncoder(w).Encode(err)
+		return
+	}
+	otpc := &dgoogauth.OTPConfig{
+		Secret:      secret,
+		WindowSize:  3,
+		HotpCounter: 0,
+	}
+
+	_ = json.NewDecoder(req.Body).Decode(&otpToken)
+	decodedToken["authorized"], _ = otpc.Authenticate(otpToken)
+	if decodedToken["authorized"] == false {
+		json.NewEncoder(w).Encode("Invalid one-time password")
+		return
+	}
+	jwToken, _ := SignJwt(decodedToken, secretKey)
+	json.NewEncoder(w).Encode(jwToken)
+}
+
+func SignJwt(claims jwt.MapClaims, secret string) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func VerifyJwt(token string, secret string) (map[string]interface{}, error) {
+	jwToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("There was an error")
 		}
-		return []byte(secretKey), nil
+		return []byte(secret), nil
 	})
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		var user User
-		mapstructure.Decode(claims, &user)
-		json.NewEncoder(w).Encode(user)
-	} else {
-		json.NewEncoder(w).Encode(Exception{Message: "Invalid authorization token"})
+	if err != nil {
+		return nil, err
 	}
+	if !jwToken.Valid {
+		return nil, fmt.Errorf("Invalid authorization token")
+	}
+	return jwToken.Claims.(jwt.MapClaims), nil
+}
+
+func GetBearerToken(header string) (string, error) {
+	if header == "" {
+		return "", fmt.Errorf("An authorization header is required")
+	}
+	token := strings.Split(header, " ")
+	if len(token) != 2 {
+		return "", fmt.Errorf("Malformed bearer token")
+	}
+	return token[1], nil
+}
+
+func GenerateSecret(w http.ResponseWriter, req *http.Request) {
+	random := make([]byte, 10)
+	rand.Read(random)
+	secret := base32.StdEncoding.EncodeToString(random)
+	json.NewEncoder(w).Encode(secret)
 }
 
 func loginWithToken(w http.ResponseWriter, req *http.Request) {
@@ -204,17 +373,24 @@ func loginWithToken(w http.ResponseWriter, req *http.Request) {
 
 	user.Name = req.Form.Get("username")
 	user.Password = req.Form.Get("password")
+	authorized := req.Form.Get("authorized")
 
 	if checkIfExists(user.Name) == true {
 		if checkPassword(user.Name, user.Password) {
-			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-				"username": user.Name,
-				"password": user.Password,
-			})
+			mockUser := make(map[string]interface{})
+			mockUser["username"] = user.Name
+			mockUser["password"] = user.Password
 
-			tokenString, error := token.SignedString([]byte(secretKey))
-			if error != nil {
-				fmt.Println(error)
+			if authorized == "true" {
+				mockUser["authorized"] = true
+			} else {
+				mockUser["authorized"] = false
+			}
+
+			tokenString, err := SignJwt(mockUser, secretKey)
+			if err != nil {
+				json.NewEncoder(w).Encode(err)
+				return
 			}
 
 			tracelog.Trace("server", "createTokenEndpoint", "Token created")
@@ -236,8 +412,9 @@ func register(w http.ResponseWriter, req *http.Request) {
 
 	var user = req.Form.Get("username")
 	var pass = req.Form.Get("password")
+	var fauth = req.Form.Get("fauth")
 
-	saveUser(user, pass)
+	saveUser(user, pass, fauth)
 
 	w.Write([]byte("Registered successfully"))
 }
@@ -270,7 +447,7 @@ func login(w http.ResponseWriter, req *http.Request) {
 func list(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-	fmt.Println("LISTING FILES")
+	fmt.Println("-- FILES --")
 
 	user := req.URL.Query().Get("user")
 
@@ -279,8 +456,6 @@ func list(w http.ResponseWriter, req *http.Request) {
 	for i := range files.Files {
 		fmt.Print("Name: ")
 		fmt.Println(files.Files[i].Name)
-		fmt.Print(" - ID: ")
-		fmt.Println(files.Files[i].ID)
 		fmt.Print(" - Size: ")
 		fmt.Println(files.Files[i].Size)
 		fmt.Print(" - Time: ")
@@ -324,42 +499,95 @@ func addFileToBD(file File, user string) {
 	Chk(err)
 }
 
-// Funcion para subir archivo
-func upload(w http.ResponseWriter, req *http.Request) {
-	req.ParseForm()                              // es necesario parsear el formulario
-	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+func deleteFileFromBD(userFiles Files, filename string, user string) {
+	gUsers := make(map[string]User)
+	loadMap(gUsers)
 
-	var user = req.Form.Get("username")
-	var filename = req.Form.Get("filename")
+	// Obtenemos usuarios
+	users := readUsers()
+	var userActual User
 
-	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
-	file, err := ioutil.ReadFile("./" + filename)
-	Chk(err)
+	// Obtenemos usuario actual y guardamos los ficheros
+	for _, u := range users {
+		if u.Name == user {
+			userActual = u
+		}
+	}
 
-	// Contamos archivos actuales en bd y guardamos contador
-	files := listFiles(user)
-	contador := len(files.Files)
+	// Creamos nuevo array que guardaremos sin el fichero borrado
+	var files Files
+	//var numFiles = len(userActual.UserFiles.Files) - 1 // Restamos el elemento que vamos a borrar
 
-	// Encriptamos el fichero
-	//keyClient := sha512.Sum512([]byte(filename))
-	//keyData := keyClient[32:64] // una mitad para cifrar datos (256 bits)
+	// Mientras el nombre sea diferente, vamos añadiendo ficheros a la bd
+	for _, f := range userActual.UserFiles.Files {
+		if f.Name != filename {
+			files.Files = append(files.Files, f)
+		}
+	}
 
-	// Obtenemos la key del usuario y la usamos para cifrar el fichero
-	keyData := decode64(getUserKey(user))
-	fichero := encrypt(file, keyData)
+	// Guardamos en el usuario el nuevo slice
+	userActual.UserFiles.Files = files.Files
 
-	// Creamos el fichero a añadir para ponerle id y timestamp
-	var archivoAñadir = File{ID: contador + 1, Name: filename, Size: int64(len(file)), Time: time.Now()}
+	// Almacenamos el usuario
+	gUsers[userActual.Name] = userActual
 
-	err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
-	if err == nil {
-		fmt.Println("File " + filename + " uploaded")
-	} else {
+	// Serializamos el mapa
+	jsonString, err := json.Marshal(gUsers)
+	if err != nil {
 		fmt.Println(err)
 	}
 
-	// Guardamos la info del fichero en BD
-	addFileToBD(archivoAñadir, user)
+	// Guardamos el mapa serializado en formato JSON
+	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
+	Chk(err)
+}
+
+// Funcion para subir archivo
+func upload(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	w.Header().Set("Content-Type", "text/plain")
+
+	var user = req.Header.Get("username")
+	var filename = req.Header.Get("filename")
+
+	var validFilename = false
+
+	filesToUpload := listFilesToUpoad(user)
+
+	for _, f := range filesToUpload.Files {
+		if filename == f.Name {
+			validFilename = true
+		}
+	}
+
+	if validFilename {
+		// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
+		file, err := ioutil.ReadFile("./client/filesToUpload/" + filename)
+		Chk(err)
+
+		// Obtenemos la key del usuario y la usamos para cifrar el fichero
+		keyData := decode64(getUserKey(user))
+		fichero := encrypt(file, keyData)
+
+		// Creamos el fichero a añadir para ponerle id y timestamp
+		var archivoAñadir = File{Name: filename, Size: int64(len(file)), Time: time.Now()}
+
+		err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
+		if err == nil {
+			fmt.Println("File " + filename + " uploaded")
+		} else {
+			fmt.Println(err)
+		}
+
+		// Guardamos la info del fichero en BD
+		addFileToBD(archivoAñadir, user)
+
+		response(w, true, "File "+filename+" uploaded")
+
+	} else {
+		response(w, false, "The file does not exist")
+	}
+
 }
 
 // Funcion para subir archivo
@@ -367,27 +595,63 @@ func download(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
-	var user = req.Form.Get("username")
-	var filename = req.Form.Get("filename")
+	var user = req.Header.Get("username")
+	var filename = req.Header.Get("filename")
 
-	// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
-	file, err := ioutil.ReadFile("./files/" + user + "/" + filename)
+	var validFilename = false
+
+	filesToUpload := listFilesToUpoad(user)
+
+	for _, f := range filesToUpload.Files {
+		if filename == f.Name {
+			validFilename = true
+		}
+	}
+
+	if validFilename {
+		// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
+		file, err := ioutil.ReadFile("./files/" + user + "/" + filename)
+		Chk(err)
+
+		// Obtenemos la key del usuario y la usamos para descifrar el fichero
+		keyData := decode64(getUserKey(user))
+		fichero := decrypt(file, keyData)
+
+		currentTime := time.Now().Local()
+
+		err = ioutil.WriteFile("./downloads/"+currentTime.Format("2006-01-02")+"_"+filename, fichero, 0644)
+		if err == nil {
+			fmt.Println("File " + filename + " downloaded")
+		} else {
+			fmt.Println(err)
+		}
+
+		response(w, true, "File "+filename+" downloaded")
+	} else {
+		response(w, false, "The file does not exist")
+	}
+
+}
+
+func delete(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()                              // es necesario parsear el formulario
+	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
+
+	var user = req.Header.Get("username")
+	var filename = req.Header.Get("filename")
+
+	err := os.Remove("./files/" + user + "/" + filename)
 	Chk(err)
 
-	// Obtenemos la key del usuario y la usamos para descifrar el fichero
-	keyData := decode64(getUserKey(user))
-	fichero := decrypt(file, keyData)
+	userFiles := listFiles(user)
 
-	err = ioutil.WriteFile("./downloads/Descarga_"+filename, fichero, 0644)
-	if err == nil {
-		fmt.Println("File " + filename + " downloaded")
-	} else {
-		fmt.Println(err)
-	}
+	deleteFileFromBD(userFiles, filename, user)
+
+	response(w, true, "File "+filename+" deleted")
 }
 
 /*
-*	FUNCIONES
+*	FUNCTIONS
  */
 
 // función para codificar de []bytes a string (Base64)
@@ -446,7 +710,7 @@ func readUsers() map[string]User {
 }
 
 // Guarda el usuario y la contraseña cifrados
-func saveUser(username string, password string) {
+func saveUser(username string, password string, fauth string) {
 
 	gUsers := make(map[string]User)
 
@@ -465,6 +729,7 @@ func saveUser(username string, password string) {
 
 	var newUser User
 	newUser.Name = username
+	newUser.FAuth = fauth
 
 	// Hash en servidor con Bcrypt
 	passHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -570,21 +835,63 @@ func getUserKey(user string) string {
 
 func listFiles(user string) Files {
 
+	users := make(map[string]User)
+
+	var userFiles Files
+
+	raw, err := ioutil.ReadFile("./db/db.json")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	json.Unmarshal(raw, &users)
+
+	for us := range users {
+		if users[us].Name == user {
+			userFiles = users[us].UserFiles
+		}
+	}
+
+	return userFiles
+}
+
+func listFilesToUpoad(user string) Files {
+
 	// Creo un mapa de ficheros
 	var gFiles Files
 
-	files, err := ioutil.ReadDir("./files/" + user)
+	files, err := ioutil.ReadDir("./client/filesToUpload")
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 
 	// Guardo la información
-	for i, f := range files {
+	for _, f := range files {
 		// Creo un archivo
-		var archivo = File{ID: i, Name: f.Name(), Size: f.Size(), Time: time.Now()}
+		var archivo = File{Name: f.Name(), Size: f.Size(), Time: time.Now()}
 
 		gFiles.Files = append(gFiles.Files, archivo)
 	}
 
 	return gFiles
+}
+
+// Returns two-factor auth field from given user
+func checkFAEnabled(user string) bool {
+	users := make(map[string]User)
+
+	raw, err := ioutil.ReadFile("./db/db.json")
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	json.Unmarshal(raw, &users)
+
+	for us := range users {
+		var name = users[us].Name
+		if name == user {
+			return users[us].FAuthEnabled
+		}
+	}
+
+	// Si falla, devuelve el nombre del usuario
+	return false
 }

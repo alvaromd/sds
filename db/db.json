@@ -1,21 +1,26 @@
 {
     "alvaro": {
         "name": "alvaro",
-        "password": "JDJhJDEwJElSNVlmVnlXT1hiWmc0Qnlva0JkRU8ub3dNdXZDZHBhVEJ1OHJwNkxwdkF0cHVOWi4uRzlP",
-        "key": "ibLpzD4nQHN1M9LjwC57uJIGbL9ZPPFNIj1T74aQ+4s=",
+        "password": "JDJhJDEwJFhMalJDd3hJZHFNSm1SYVphYmw2dmVoaXdYV2pZeGgvZ2ZmTElFbFJpeFNONmxkQy9OZ3Jp",
+        "key": "Fw8QhZc6Few4Uh41IgcsiO6zpVJngTvCBZHxE6mZMZA=",
+        "fauth": "J23I7WQ4I4LIU3TW",
+        "fauthenabled": false,
+        "files": {
+            "files": null
+        }
+    },
+    "pepe": {
+        "name": "pepe",
+        "password": "JDJhJDEwJDBWVkl0ZDZsZ2Qycnl2WUk4cWVTeGVYbVV1UjNtQzdQL1RocWloS3RzNGRPWnU2YUVUYnVh",
+        "key": "XbgbhJJBdIzytyHvNtoRT2ft4bUKP7CT1IsKiZdWSF0=",
+        "fauth": "X6N5UR5G5HCFYNUG",
+        "fauthenabled": false,
         "files": {
             "files": [
                 {
-                    "id": 1,
-                    "file": "ejemplo.txt",
-                    "size": 8,
-                    "time": "2018-05-28T17:48:59.679342811+02:00"
-                },
-                {
-                    "id": 2,
                     "file": "ejemplo2.txt",
                     "size": 21,
-                    "time": "2018-05-29T18:27:03.856152+02:00"
+                    "time": "2018-06-04T13:38:59.821501536+02:00"
                 }
             ]
         }

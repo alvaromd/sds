@@ -19,10 +19,12 @@ import (
 )
 
 type User struct {
-	Name      string `json:"name"`
-	Password  string `json:"password"`
-	Key       string `json:"key"`
-	UserFiles Files  `json:"files"`
+	Name         string `json:"name"`
+	Password     string `json:"password"`
+	Key          string `json:"key"`
+	FAuthEnabled bool   `json:"fauthenabled"`
+	FAuth        string `json:"fauth"`
+	UserFiles    Files  `json:"files"`
 }
 
 // Files struct array de ficheros
@@ -36,6 +38,12 @@ type File struct {
 	Name string    `json:"file"`
 	Size int64     `json:"size"`
 	Time time.Time `json:"time"`
+}
+
+// Respuesta del servidor
+type resp struct {
+	Ok  bool   // true -> correcto, false -> error
+	Msg string // mensaje adicional
 }
 
 // Respuesta del servidor
@@ -78,15 +86,14 @@ func Client() {
 	var checked bool
 	var responseToken respToken
 	var token string
+	var doubleFA bool
 
-	// Mientras no elija salir
 	for command != "exit" {
-
 		if command != "register" {
 			if checked {
-				fmt.Printf("Options: | list | upload | download | logout | exit |")
+				fmt.Printf("Options: | list | upload | download | delete | 2fauth | logout | exit |")
 			} else {
-				fmt.Printf("Options: | register | login | 2fauth | exit |")
+				fmt.Printf("Options: | login | register | exit |")
 			}
 		}
 
@@ -100,7 +107,6 @@ func Client() {
 		switch command {
 		// LOGIN USER with Jwt Token
 		case "login":
-
 			// Request user and password
 			fmt.Printf("Username: ")
 			fmt.Scanf("%s\n", &user.Name)
@@ -111,10 +117,25 @@ func Client() {
 			// Hashing password
 			password := hashPass(user.Password)
 
-			// Estructura con los valores a enviar en la peticion POST
 			data := url.Values{}
 			data.Set("username", user.Name)
 			data.Set("password", password) // password (string) con hash y base64
+
+			var enabled resp
+
+			// Token auth
+			checkFA, err := client.PostForm("https://localhost:10443/checkUserFA", data)
+			Chk(err)
+
+			fa, _ := ioutil.ReadAll(checkFA.Body)
+			json.Unmarshal(fa, &enabled)
+
+			doubleFA = enabled.Ok
+
+			// If two-FA is not enabled, set authorized to true to pass over the middleware
+			if !enabled.Ok {
+				data.Set("authorized", "true")
+			}
 
 			// Token auth
 			r, err := client.PostForm("https://localhost:10443/login", data)
@@ -137,26 +158,75 @@ func Client() {
 
 		// 2 factor authentication (optional login, not requested)
 		case "2fauth":
-			url := "https://localhost:10443/test"
-			req, err := http.NewRequest("GET", url, nil)
+			var enable string
+			var disable string
+
+			// Get fauth from user
+			var fauth resp
+
+			dataSecret := url.Values{}
+			dataSecret.Set("username", user.Name)
+
+			reqFauth, err := client.PostForm("https://localhost:10443/getFauth", dataSecret)
 			Chk(err)
 
-			req.Header.Set("Authorization", "Bearer "+token)
+			contentFauth, _ := ioutil.ReadAll(reqFauth.Body)
+			json.Unmarshal(contentFauth, &fauth)
 
-			resp, err := client.Do(req)
-			Chk(err)
+			if !doubleFA {
+				fmt.Print("Two factor authentication is not enabled. Enable it? (Y) (N):  ")
+				fmt.Scanf("%s\n", &enable)
 
-			content, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				log.Fatal(err)
+				if enable == "Y" {
+					// Token from mobile
+					var otpToken string
+					fmt.Printf("Write the numbers that appears on your mobile screen: ")
+					fmt.Scanf("%s\n", &otpToken)
+
+					req, err := http.NewRequest("POST", "https://localhost:10443/2fauth", nil)
+					Chk(err)
+
+					req.Header.Set("Authorization", "Bearer "+token)
+					req.Header.Set("otpToken", otpToken)
+					req.Header.Set("secret", fauth.Msg)
+
+					response, err := client.Do(req)
+					Chk(err)
+
+					response.Body.Close()
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					var respFA resp
+					// Double auth factor enabled
+					enableFA, err := client.PostForm("https://localhost:10443/enableTwoFA", dataSecret)
+					Chk(err)
+
+					respEnableFA, _ := ioutil.ReadAll(enableFA.Body)
+					json.Unmarshal(respEnableFA, &respFA)
+
+					fmt.Println(respFA.Msg)
+				}
+			} else {
+				fmt.Print("Two factor authentication is enabled. Disable it? (Y) (N):  ")
+				fmt.Scanf("%s\n", &disable)
+
+				if disable == "Y" {
+					var respFA resp
+					// Double auth factor enabled
+					disableFA, err := client.PostForm("https://localhost:10443/disableTwoFA", dataSecret)
+					Chk(err)
+
+					respDisableFA, _ := ioutil.ReadAll(disableFA.Body)
+					json.Unmarshal(respDisableFA, &respFA)
+
+					fmt.Println(respFA.Msg)
+				}
 			}
 
-			fmt.Printf("%s", content)
-
 		case "test":
-			url := "https://localhost:10443/test"
-			req, err := http.NewRequest("GET", url, nil)
+			req, err := http.NewRequest("GET", "https://localhost:10443/test", nil)
 			Chk(err)
 
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -174,6 +244,8 @@ func Client() {
 
 		// REGISTER USER
 		case "register":
+			var userKey string
+
 			fmt.Printf("Username: ")
 			fmt.Scanf("%s\n", &regUser.Name)
 
@@ -183,10 +255,29 @@ func Client() {
 			// Hasheamos contraseña con SHA512
 			password := hashPass(regUser.Password)
 
+			// Generate secret key
+			req, err := http.NewRequest("GET", "https://localhost:10443/gen-secret", nil)
+			Chk(err)
+			resp, err := client.Do(req)
+			Chk(err)
+
+			content, err := ioutil.ReadAll(resp.Body)
+
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Save secret key
+			json.Unmarshal(content, &userKey)
+
+			fmt.Println("This is your code for double factor auth, write it down: " + userKey)
+
 			// Estructura con los valores a enviar en la peticion POST
 			data := url.Values{}
 			data.Set("username", regUser.Name)
 			data.Set("password", password) // password (string) con hash y base64
+			data.Set("fauth", userKey)
 
 			// POST request
 			r, err := client.PostForm("https://localhost:10443/register", data)
@@ -197,18 +288,30 @@ func Client() {
 			command = ""
 		// Shows files from user
 		case "list":
-			r, err := client.Get("https://localhost:10443/list?user=" + user.Name)
+
+			r, err := http.NewRequest("GET", "https://localhost:10443/list?user="+user.Name, nil)
 			Chk(err)
 
-			bodyBytes, err := ioutil.ReadAll(r.Body)
+			r.Header.Set("Authorization", "Bearer "+token)
+
+			response, err := client.Do(r)
 			Chk(err)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			bodyBytes, err := ioutil.ReadAll(response.Body)
+			Chk(err)
+
+			response.Body.Close()
 
 			var ficheros Files
 
 			erro := json.Unmarshal(bodyBytes, &ficheros)
 			Chk(erro)
 
-			fmt.Println("FILES")
+			fmt.Println("-- FILES --")
 			for _, f := range ficheros.Files {
 				fmt.Print("Name: ")
 				fmt.Println(f.Name)
@@ -222,41 +325,108 @@ func Client() {
 
 		case "upload":
 			var filename string
+			var response resp
 
 			// Filename request
 			fmt.Printf("Filename: ")
 			fmt.Scanf("%s\n", &filename)
 
-			data := url.Values{}
-			data.Set("username", user.Name)
-			data.Set("filename", filename) // password (string) with hash & base64
-
-			// POST register
-			r, err := client.PostForm("https://localhost:10443/upload", data)
+			r, err := http.NewRequest("POST", "https://localhost:10443/upload", nil)
 			Chk(err)
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("username", user.Name)
+			r.Header.Set("filename", filename)
+
+			resp, _ := client.Do(r)
+			Chk(err)
+
 			if err != nil {
-				panic(err)
+				log.Fatal(err)
 			}
-			io.Copy(os.Stdout, r.Body)
+
+			content, err := ioutil.ReadAll(resp.Body)
+
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Save secret key
+			json.Unmarshal(content, &response)
+
+			resp.Body.Close()
+
+			fmt.Println(response.Msg)
 
 		case "download":
 			var filename string
+			var response resp
 
 			// Choose file to download
 			fmt.Printf("Filename: ")
 			fmt.Scanf("%s\n", &filename)
 
-			data := url.Values{}
-			data.Set("username", user.Name)
-			data.Set("filename", filename) // password (string) with hash & base64
-
-			// POST request
-			r, err := client.PostForm("https://localhost:10443/download", data)
+			r, err := http.NewRequest("POST", "https://localhost:10443/download", nil)
 			Chk(err)
-			if err == nil {
-				checked = true
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("username", user.Name)
+			r.Header.Set("filename", filename)
+
+			resp, _ := client.Do(r)
+			Chk(err)
+
+			if err != nil {
+				log.Fatal(err)
 			}
-			io.Copy(os.Stdout, r.Body)
+
+			content, err := ioutil.ReadAll(resp.Body)
+
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Save secret key
+			json.Unmarshal(content, &response)
+
+			resp.Body.Close()
+
+			fmt.Println(response.Msg)
+
+		case "delete":
+			var filename string
+			var response resp
+
+			// Choose file to download
+			fmt.Printf("Filename: ")
+			fmt.Scanf("%s\n", &filename)
+
+			r, err := http.NewRequest("POST", "https://localhost:10443/delete", nil)
+			Chk(err)
+			r.Header.Set("Authorization", "Bearer "+token)
+			r.Header.Set("username", user.Name)
+			r.Header.Set("filename", filename)
+
+			resp, _ := client.Do(r)
+			Chk(err)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			content, err := ioutil.ReadAll(resp.Body)
+
+			resp.Body.Close()
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Save secret key
+			json.Unmarshal(content, &response)
+
+			resp.Body.Close()
+
+			fmt.Println(response.Msg)
 
 		// Desconectar usuario
 		case "logout":
