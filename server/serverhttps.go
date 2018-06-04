@@ -640,14 +640,29 @@ func delete(w http.ResponseWriter, req *http.Request) {
 	var user = req.Header.Get("username")
 	var filename = req.Header.Get("filename")
 
-	err := os.Remove("./files/" + user + "/" + filename)
-	Chk(err)
+	var validFilename = false
 
-	userFiles := listFiles(user)
+	filesToUpload := listFilesToUpoad(user)
 
-	deleteFileFromBD(userFiles, filename, user)
+	for _, f := range filesToUpload.Files {
+		if filename == f.Name {
+			validFilename = true
+		}
+	}
 
-	response(w, true, "File "+filename+" deleted")
+	if validFilename {
+		err := os.Remove("./files/" + user + "/" + filename)
+		Chk(err)
+
+		userFiles := listFiles(user)
+
+		deleteFileFromBD(userFiles, filename, user)
+
+		response(w, true, "File "+filename+" deleted")
+	} else {
+		response(w, false, "The file does not exist")
+	}
+
 }
 
 /*
