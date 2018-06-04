@@ -80,7 +80,7 @@ func response(w io.Writer, ok bool, msg string) {
 	w.Write(rJSON)                 // escribimos el JSON resultante
 }
 
-func responseFiles(w io.Writer, fichero map[int]File) {
+func responseFiles(w io.Writer, fichero Files) {
 	rJSON, err := json.Marshal(&fichero) // codificamos en JSON
 	Chk(err)                             // comprobamos error
 	w.Write(rJSON)                       // escribimos el JSON resultante
@@ -122,18 +122,18 @@ func Server() {
 	// Endpoints
 	mux.Handle("/register", http.HandlerFunc(register))
 	mux.Handle("/login", http.HandlerFunc(loginWithToken))
-	mux.Handle("/list", http.HandlerFunc(ValidateMiddleware(listUserFiles)))
-	mux.Handle("/upload", http.HandlerFunc(ValidateMiddleware(upload)))
-	mux.Handle("/download", http.HandlerFunc(ValidateMiddleware(download)))
-	mux.Handle("/delete", http.HandlerFunc(ValidateMiddleware(delete)))
+	mux.HandleFunc("/list", ValidateMiddleware(listUserFiles))
+	mux.HandleFunc("/upload", ValidateMiddleware(uploadEndpoint))
+	mux.HandleFunc("/download", ValidateMiddleware(downloadEndpoint))
+	mux.HandleFunc("/delete", ValidateMiddleware(delete))
 
 	mux.Handle("/gen-secret", http.HandlerFunc(GenerateSecret))
 	mux.Handle("/2fauth", http.HandlerFunc(VerifyOtpEndpoint))
 	mux.Handle("/getFauth", http.HandlerFunc(getUserFauth))
 
+	//mux.Handle("/checkUserFA", http.HandlerFunc(checkFAEnabledEndpoint))
 	mux.Handle("/enableTwoFA", http.HandlerFunc(enableTwoFAEndpoint))
 	mux.Handle("/disableTwoFA", http.HandlerFunc(disableTwoFAEndpoint))
-	mux.Handle("/checkUserFA", http.HandlerFunc(checkFAEnabledEndpoint))
 
 	srv := &http.Server{Addr: ":10443", Handler: mux}
 
@@ -160,12 +160,14 @@ func Server() {
 
 func ValidateMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		bearerToken, err := GetBearerToken(req.Header.Get("authorization"))
+		bearerToken, err := GetBearerToken(req.Header.Get("Authorization"))
+
 		if err != nil {
 			json.NewEncoder(w).Encode(err)
 			return
 		}
 		decodedToken, err := VerifyJwt(bearerToken, secretKey)
+
 		if err != nil {
 			json.NewEncoder(w).Encode(err)
 			return
@@ -297,15 +299,23 @@ func getUserFauth(w http.ResponseWriter, req *http.Request) {
 	response(w, true, resp)
 }
 
+func GetBearerToken(header string) (string, error) {
+	if header == "" {
+		return "", fmt.Errorf("An authorization header is required")
+	}
+	token := strings.Split(header, " ")
+	if len(token) != 2 {
+		return "", fmt.Errorf("Malformed bearer token")
+	}
+	return token[1], nil
+}
+
 func VerifyOtpEndpoint(w http.ResponseWriter, req *http.Request) {
 	var secret = req.Header.Get("secret")
 	var otpToken = req.Header.Get("otpToken")
 
-	bearerToken, err := GetBearerToken(req.Header.Get("authorization"))
-	if err != nil {
-		json.NewEncoder(w).Encode(err)
-		return
-	}
+	bearerToken, err := GetBearerToken(req.Header.Get("Authorization"))
+
 	decodedToken, err := VerifyJwt(bearerToken, secretKey)
 	if err != nil {
 		json.NewEncoder(w).Encode(err)
@@ -317,7 +327,6 @@ func VerifyOtpEndpoint(w http.ResponseWriter, req *http.Request) {
 		HotpCounter: 0,
 	}
 
-	_ = json.NewDecoder(req.Body).Decode(&otpToken)
 	decodedToken["authorized"], _ = otpc.Authenticate(otpToken)
 	if decodedToken["authorized"] == false {
 		json.NewEncoder(w).Encode("Invalid one-time password")
@@ -325,7 +334,8 @@ func VerifyOtpEndpoint(w http.ResponseWriter, req *http.Request) {
 	}
 	jwToken, _ := SignJwt(decodedToken, secretKey)
 
-	json.NewEncoder(w).Encode(jwToken)
+	//json.NewEncoder(w).Encode(jwToken)
+	responseToken(w, true, "Token generated", jwToken)
 }
 
 func SignJwt(claims jwt.MapClaims, secret string) (string, error) {
@@ -349,17 +359,6 @@ func VerifyJwt(token string, secret string) (map[string]interface{}, error) {
 	return jwToken.Claims.(jwt.MapClaims), nil
 }
 
-func GetBearerToken(header string) (string, error) {
-	if header == "" {
-		return "", fmt.Errorf("An authorization header is required")
-	}
-	token := strings.Split(header, " ")
-	if len(token) != 2 {
-		return "", fmt.Errorf("Malformed bearer token")
-	}
-	return token[1], nil
-}
-
 func GenerateSecret(w http.ResponseWriter, req *http.Request) {
 	random := make([]byte, 10)
 	rand.Read(random)
@@ -376,7 +375,6 @@ func loginWithToken(w http.ResponseWriter, req *http.Request) {
 
 	user.Name = req.Form.Get("username")
 	user.Password = req.Form.Get("password")
-	authorized := req.Form.Get("authorized")
 
 	if checkIfExists(user.Name) == true {
 		if checkPassword(user.Name, user.Password) {
@@ -384,11 +382,9 @@ func loginWithToken(w http.ResponseWriter, req *http.Request) {
 			mockUser["username"] = user.Name
 			mockUser["password"] = user.Password
 
-			if authorized == "true" {
-				mockUser["authorized"] = true
-			} else {
-				mockUser["authorized"] = false
-			}
+			//faEnabled := checkFAEnabled(user.Name)
+
+			mockUser["authorized"] = true
 
 			tokenString, err := SignJwt(mockUser, secretKey)
 			if err != nil {
@@ -466,9 +462,10 @@ func listUserFiles(w http.ResponseWriter, req *http.Request) {
 		fmt.Println(files.Files[i].Time)
 	}
 
-	ficheros, _ := json.Marshal(files)
+	//ficheros, _ := json.Marshal(files)
+	//w.Write(ficheros)
 
-	w.Write(ficheros)
+	responseFiles(w, files)
 	tracelog.Trace("server", "listUserFiles", "Files of "+user+" listed")
 }
 
@@ -552,7 +549,7 @@ func deleteFileFromBD(userFiles Files, filename string, user string) {
 }
 
 // Funcion para subir archivo
-func upload(w http.ResponseWriter, req *http.Request) {
+func uploadEndpoint(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()
 	w.Header().Set("Content-Type", "text/plain")
 
@@ -561,7 +558,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 
 	var validFilename = false
 
-	filesToUpload := listFilesToUpoad(user)
+	filesToUpload := listFilesToUpload(user)
 
 	for _, f := range filesToUpload.Files {
 		if filename == f.Name {
@@ -570,7 +567,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if validFilename {
-		// Leemos el archivo indicado, por ahora en la misma ruta que el proyecto
+		// Leemos el archivo indicado
 		file, err := ioutil.ReadFile("./client/filesToUpload/" + filename)
 		Chk(err)
 
@@ -578,7 +575,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 		keyData := decode64(getUserKey(user))
 		fichero := encrypt(file, keyData)
 
-		// Creamos el fichero a añadir para ponerle id y timestamp
+		// Creamos el fichero con sus datos
 		var archivoAñadir = File{Name: filename, Size: int64(len(file)), Time: time.Now()}
 
 		err = ioutil.WriteFile("./files/"+user+"/"+filename, fichero, 0644)
@@ -602,7 +599,7 @@ func upload(w http.ResponseWriter, req *http.Request) {
 }
 
 // Funcion para subir archivo
-func download(w http.ResponseWriter, req *http.Request) {
+func downloadEndpoint(w http.ResponseWriter, req *http.Request) {
 	req.ParseForm()                              // es necesario parsear el formulario
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
@@ -611,7 +608,7 @@ func download(w http.ResponseWriter, req *http.Request) {
 
 	var validFilename = false
 
-	filesToUpload := listFilesToUpoad(user)
+	filesToUpload := listFiles(user)
 
 	for _, f := range filesToUpload.Files {
 		if filename == f.Name {
@@ -655,7 +652,7 @@ func delete(w http.ResponseWriter, req *http.Request) {
 
 	var validFilename = false
 
-	filesToUpload := listFilesToUpoad(user)
+	filesToUpload := listFiles(user)
 
 	for _, f := range filesToUpload.Files {
 		if filename == f.Name {
@@ -744,22 +741,12 @@ func saveUser(username string, password string, fauth string) {
 
 	gUsers := make(map[string]User)
 
-	//var masterKey string
-	// la primera vez pedimos una clave maestra
-	/*
-		if !loadMap(gUsers) {
-			fmt.Print("Enter master key (first time): ")
-		} else {
-			fmt.Print("Enter master key: ")
-		}
-		fmt.Scanf("%s \n", &masterKey)
-	*/
-
 	loadMap(gUsers)
 
 	var newUser User
 	newUser.Name = username
 	newUser.FAuth = fauth
+	newUser.FAuthEnabled = false
 
 	// Hash en servidor con Bcrypt
 	passHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -886,7 +873,7 @@ func listFiles(user string) Files {
 	return userFiles
 }
 
-func listFilesToUpoad(user string) Files {
+func listFilesToUpload(user string) Files {
 
 	// Creo un mapa de ficheros
 	var gFiles Files

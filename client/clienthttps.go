@@ -22,8 +22,8 @@ type User struct {
 	Name         string `json:"name"`
 	Password     string `json:"password"`
 	Key          string `json:"key"`
-	FAuthEnabled bool   `json:"fauthenabled"`
 	FAuth        string `json:"fauth"`
+	FAuthEnabled bool   `json:"fauthenabled"`
 	UserFiles    Files  `json:"files"`
 }
 
@@ -84,16 +84,20 @@ func Client() {
 	var regUser User
 	var command string
 	var checked bool
-	var responseToken respToken
 	var token string
-	var doubleFA bool
+
+	fmt.Println("\n###### REMOTE BACKUP PROJECT ######")
+	fmt.Println("> SDS 2018 | UA")
+	fmt.Println("> Created by: Alvaro Muñoz Delgado\n")
 
 	for command != "exit" {
 		if command != "register" {
 			if checked {
-				fmt.Printf("Options: | list | upload | download | delete | 2fauth | logout | exit |")
+				fmt.Println("> Select an option, " + user.Name)
+				fmt.Printf("list | upload | download | delete | logout | exit")
 			} else {
-				fmt.Printf("Options: | login | register | exit |")
+				fmt.Println("> Select an option")
+				fmt.Printf("login | register | exit")
 			}
 		}
 
@@ -107,6 +111,14 @@ func Client() {
 		switch command {
 		// LOGIN USER with Jwt Token
 		case "login":
+			var twofact string
+			var responseToken respToken
+			var newToken respToken
+
+			token = ""
+
+			fmt.Println("\n> Login")
+
 			// Request user and password
 			fmt.Printf("Username: ")
 			fmt.Scanf("%s\n", &user.Name)
@@ -119,22 +131,19 @@ func Client() {
 
 			data := url.Values{}
 			data.Set("username", user.Name)
-			data.Set("password", password) // password (string) con hash y base64
+			data.Set("password", password) // password (string) with hash & base64
 
-			var enabled resp
+			fmt.Printf("Would you like to use Two-factor authentication? (Y) (N): ")
+			fmt.Scanf("%s\n", &twofact)
 
-			// Token auth
-			checkFA, err := client.PostForm("https://localhost:10443/checkUserFA", data)
-			Chk(err)
+			if twofact == "Y" {
+				var respFA resp
+				// Double auth factor enabled
+				disableFA, err := client.PostForm("https://localhost:10443/disableTwoFA", data)
+				Chk(err)
 
-			fa, _ := ioutil.ReadAll(checkFA.Body)
-			json.Unmarshal(fa, &enabled)
-
-			doubleFA = enabled.Ok
-
-			// If two-FA is not enabled, set authorized to true to pass over the middleware
-			if !enabled.Ok {
-				data.Set("authorized", "true")
+				respDisableFA, _ := ioutil.ReadAll(disableFA.Body)
+				json.Unmarshal(respDisableFA, &respFA)
 			}
 
 			// Token auth
@@ -147,114 +156,72 @@ func Client() {
 			// Convert JWT struct to string to pass through Query Param
 			token = responseToken.Token
 
+			if twofact == "Y" {
+				// Get fauth from user
+				var fauth resp
+
+				dataSecret := url.Values{}
+				dataSecret.Set("username", user.Name)
+
+				// Obtain secret key for this user
+				reqFauth, err := client.PostForm("https://localhost:10443/getFauth", dataSecret)
+				Chk(err)
+
+				contentFauth, _ := ioutil.ReadAll(reqFauth.Body)
+				json.Unmarshal(contentFauth, &fauth)
+
+				// Token from mobile
+				var otpToken string
+				fmt.Printf("Write the numbers that appears on your mobile screen: ")
+				fmt.Scanf("%s\n", &otpToken)
+
+				// Verify OTP Token
+				req, err := http.NewRequest("POST", "https://localhost:10443/2fauth", nil)
+				Chk(err)
+
+				req.Header.Set("Authorization", "Bearer "+token)
+				req.Header.Set("otpToken", otpToken)
+				req.Header.Set("secret", fauth.Msg)
+
+				response, err := client.Do(req)
+				Chk(err)
+
+				tokenOTP, _ := ioutil.ReadAll(response.Body)
+				json.Unmarshal(tokenOTP, &newToken)
+
+				response.Body.Close()
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				// Saving authorized 2FA token
+				token = newToken.Token
+
+				var respFA resp
+				// Double auth factor enabled
+				enableFA, err := client.PostForm("https://localhost:10443/enableTwoFA", dataSecret)
+				Chk(err)
+
+				respEnableFA, _ := ioutil.ReadAll(enableFA.Body)
+				json.Unmarshal(respEnableFA, &respFA)
+
+			}
+
 			// Check if login was successful
-			if responseToken.Ok {
+			if newToken.Ok || responseToken.Ok {
 				checked = true
 			} else {
 				checked = false
 			}
 
+			fmt.Printf("> ")
 			fmt.Println(responseToken.Msg)
-
-		// 2 factor authentication (optional login, not requested)
-		case "2fauth":
-			var enable string
-			var disable string
-
-			// Get fauth from user
-			var fauth resp
-
-			dataSecret := url.Values{}
-			dataSecret.Set("username", user.Name)
-
-			reqFauth, err := client.PostForm("https://localhost:10443/getFauth", dataSecret)
-			Chk(err)
-
-			contentFauth, _ := ioutil.ReadAll(reqFauth.Body)
-			json.Unmarshal(contentFauth, &fauth)
-
-			var enabled resp
-
-			// Token auth
-			checkFA, err := client.PostForm("https://localhost:10443/checkUserFA", dataSecret)
-			Chk(err)
-
-			fa, _ := ioutil.ReadAll(checkFA.Body)
-			json.Unmarshal(fa, &enabled)
-
-			doubleFA = enabled.Ok
-
-			if !doubleFA {
-				fmt.Print("Two factor authentication is not enabled. Enable it? (Y) (N):  ")
-				fmt.Scanf("%s\n", &enable)
-
-				if enable == "Y" {
-					// Token from mobile
-					var otpToken string
-					fmt.Printf("Write the numbers that appears on your mobile screen: ")
-					fmt.Scanf("%s\n", &otpToken)
-
-					req, err := http.NewRequest("POST", "https://localhost:10443/2fauth", nil)
-					Chk(err)
-
-					req.Header.Set("Authorization", "Bearer "+token)
-					req.Header.Set("otpToken", otpToken)
-					req.Header.Set("secret", fauth.Msg)
-
-					response, err := client.Do(req)
-					Chk(err)
-
-					response.Body.Close()
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					var respFA resp
-					// Double auth factor enabled
-					enableFA, err := client.PostForm("https://localhost:10443/enableTwoFA", dataSecret)
-					Chk(err)
-
-					respEnableFA, _ := ioutil.ReadAll(enableFA.Body)
-					json.Unmarshal(respEnableFA, &respFA)
-
-					fmt.Println(respFA.Msg)
-				}
-			} else {
-				fmt.Print("Two factor authentication is enabled. Disable it? (Y) (N):  ")
-				fmt.Scanf("%s\n", &disable)
-
-				if disable == "Y" {
-					var respFA resp
-					// Double auth factor enabled
-					disableFA, err := client.PostForm("https://localhost:10443/disableTwoFA", dataSecret)
-					Chk(err)
-
-					respDisableFA, _ := ioutil.ReadAll(disableFA.Body)
-					json.Unmarshal(respDisableFA, &respFA)
-
-					fmt.Println(respFA.Msg)
-				}
-			}
-
-		case "test":
-			req, err := http.NewRequest("GET", "https://localhost:10443/test", nil)
-			Chk(err)
-
-			req.Header.Set("Authorization", "Bearer "+token)
-
-			resp, err := client.Do(req)
-			Chk(err)
-
-			content, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			fmt.Printf("%s", content)
+			fmt.Println(newToken.Msg)
 
 		// REGISTER USER
 		case "register":
+			fmt.Println("\n> Register new user")
+
 			var userKey string
 
 			fmt.Printf("Username: ")
@@ -299,6 +266,7 @@ func Client() {
 			command = ""
 		// Shows files from user
 		case "list":
+			fmt.Println("\n> List user files")
 
 			r, err := http.NewRequest("GET", "https://localhost:10443/list?user="+user.Name, nil)
 			Chk(err)
@@ -312,29 +280,34 @@ func Client() {
 				log.Fatal(err)
 			}
 
-			bodyBytes, err := ioutil.ReadAll(response.Body)
+			content, err := ioutil.ReadAll(response.Body)
 			Chk(err)
 
 			response.Body.Close()
 
 			var ficheros Files
 
-			erro := json.Unmarshal(bodyBytes, &ficheros)
-			Chk(erro)
+			json.Unmarshal(content, &ficheros)
 
-			fmt.Println("-- FILES --")
-			for _, f := range ficheros.Files {
-				fmt.Print("Name: ")
-				fmt.Println(f.Name)
+			if ficheros.Files != nil {
+				fmt.Println("\n-- FILES --")
+				for _, f := range ficheros.Files {
+					fmt.Print("Name: ")
+					fmt.Println(f.Name)
 
-				fmt.Print("  - Size: ")
-				fmt.Println(f.Size)
+					fmt.Print("  - Size: ")
+					fmt.Println(f.Size)
 
-				fmt.Print("  - Time: ")
-				fmt.Println(f.Time)
+					fmt.Print("  - Time: ")
+					fmt.Println(f.Time)
+				}
+			} else {
+				fmt.Print("You have no files\n")
 			}
 
 		case "upload":
+			fmt.Println("\n> Upload file")
+
 			var filename string
 			var response resp
 
@@ -344,6 +317,7 @@ func Client() {
 
 			r, err := http.NewRequest("POST", "https://localhost:10443/upload", nil)
 			Chk(err)
+
 			r.Header.Set("Authorization", "Bearer "+token)
 			r.Header.Set("username", user.Name)
 			r.Header.Set("filename", filename)
@@ -367,9 +341,12 @@ func Client() {
 
 			resp.Body.Close()
 
+			fmt.Printf("> ")
 			fmt.Println(response.Msg)
 
 		case "download":
+			fmt.Println("\n> Download file")
+
 			var filename string
 			var response resp
 
@@ -405,6 +382,8 @@ func Client() {
 			fmt.Println(response.Msg)
 
 		case "delete":
+			fmt.Println("\n> Delete user file")
+
 			var filename string
 			var response resp
 
@@ -452,6 +431,89 @@ func Client() {
 		case "exit":
 			fmt.Println("Exiting...")
 			break
+
+		/*
+			case "2fauth":
+				fmt.Println("\n> Two-factor authentication")
+
+				var enable string
+				var disable string
+
+				// Get fauth from user
+				var fauth resp
+
+				dataSecret := url.Values{}
+				dataSecret.Set("username", user.Name)
+
+				reqFauth, err := client.PostForm("https://localhost:10443/getFauth", dataSecret)
+				Chk(err)
+
+				contentFauth, _ := ioutil.ReadAll(reqFauth.Body)
+				json.Unmarshal(contentFauth, &fauth)
+
+				var enabled resp
+
+				// Token auth
+				checkFA, err := client.PostForm("https://localhost:10443/checkUserFA", dataSecret)
+				Chk(err)
+
+				fa, _ := ioutil.ReadAll(checkFA.Body)
+				json.Unmarshal(fa, &enabled)
+
+				doubleFA = enabled.Ok
+
+				if !doubleFA {
+					fmt.Print("Two factor authentication is not enabled. Enable it? (Y) (N):  ")
+					fmt.Scanf("%s\n", &enable)
+
+					if enable == "Y" {
+						// Token from mobile
+						var otpToken string
+						fmt.Printf("Write the numbers that appears on your mobile screen: ")
+						fmt.Scanf("%s\n", &otpToken)
+
+						req, err := http.NewRequest("POST", "https://localhost:10443/2fauth", nil)
+						Chk(err)
+
+						req.Header.Set("Authorization", "Bearer "+token)
+						req.Header.Set("otpToken", otpToken)
+						req.Header.Set("secret", fauth.Msg)
+
+						response, err := client.Do(req)
+						Chk(err)
+
+						response.Body.Close()
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						var respFA resp
+						// Double auth factor enabled
+						enableFA, err := client.PostForm("https://localhost:10443/enableTwoFA", dataSecret)
+						Chk(err)
+
+						respEnableFA, _ := ioutil.ReadAll(enableFA.Body)
+						json.Unmarshal(respEnableFA, &respFA)
+
+						fmt.Println(respFA.Msg)
+					}
+				} else {
+					fmt.Print("Two factor authentication is enabled. Disable it? (Y) (N):  ")
+					fmt.Scanf("%s\n", &disable)
+
+					if disable == "Y" {
+						var respFA resp
+						// Double auth factor enabled
+						disableFA, err := client.PostForm("https://localhost:10443/disableTwoFA", dataSecret)
+						Chk(err)
+
+						respDisableFA, _ := ioutil.ReadAll(disableFA.Body)
+						json.Unmarshal(respDisableFA, &respFA)
+
+						fmt.Println(respFA.Msg)
+					}
+				}
+		*/
 		default:
 			fmt.Println("Invalid command")
 		}

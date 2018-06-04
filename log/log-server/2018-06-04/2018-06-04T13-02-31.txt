@@ -1,7 +1,0 @@
-TRACE: 2018/06/04 15:02:31 tracelog.go:285: main : LogDirectoryCleanup : Started : BaseFilePath[log/log-server] DaysToKeep[30]
-TRACE: 2018/06/04 15:02:31 tracelog.go:298: main : LogDirectoryCleanup : Info : CompareDate[2018-05-05 00:00:00 +0000 UTC]
-TRACE: 2018/06/04 15:02:31 tracelog.go:335: main : LogDirectoryCleanup : Info : Checking Directory[log/log-server/2018-06-04] DaysOld[-30]
-TRACE: 2018/06/04 15:02:31 tracelog.go:353: main : LogDirectoryCleanup : Completed
-TRACE: 2018/06/04 15:02:37 serverhttps.go:399: server : createTokenEndpoint : Info : Token created
-TRACE: 2018/06/04 15:02:46 serverhttps.go:271: server : disableTwoFAEndpoint : Info : Two-factor auth disabled
-TRACE: 2018/06/04 15:02:58 serverhttps.go:232: server : enableTwoFAEndpoint : Info : Two-factor auth enabled
