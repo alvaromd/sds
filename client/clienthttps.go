@@ -173,6 +173,17 @@ func Client() {
 			contentFauth, _ := ioutil.ReadAll(reqFauth.Body)
 			json.Unmarshal(contentFauth, &fauth)
 
+			var enabled resp
+
+			// Token auth
+			checkFA, err := client.PostForm("https://localhost:10443/checkUserFA", dataSecret)
+			Chk(err)
+
+			fa, _ := ioutil.ReadAll(checkFA.Body)
+			json.Unmarshal(fa, &enabled)
+
+			doubleFA = enabled.Ok
+
 			if !doubleFA {
 				fmt.Print("Two factor authentication is not enabled. Enable it? (Y) (N):  ")
 				fmt.Scanf("%s\n", &enable)

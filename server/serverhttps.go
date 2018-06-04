@@ -122,7 +122,7 @@ func Server() {
 	// Endpoints
 	mux.Handle("/register", http.HandlerFunc(register))
 	mux.Handle("/login", http.HandlerFunc(loginWithToken))
-	mux.Handle("/list", http.HandlerFunc(ValidateMiddleware(list)))
+	mux.Handle("/list", http.HandlerFunc(ValidateMiddleware(listUserFiles)))
 	mux.Handle("/upload", http.HandlerFunc(ValidateMiddleware(upload)))
 	mux.Handle("/download", http.HandlerFunc(ValidateMiddleware(download)))
 	mux.Handle("/delete", http.HandlerFunc(ValidateMiddleware(delete)))
@@ -229,6 +229,7 @@ func enableTwoFAEndpoint(w http.ResponseWriter, req *http.Request) {
 	Chk(err)
 
 	response(w, true, "Two-factor auth enabled")
+	tracelog.Trace("server", "enableTwoFAEndpoint", "Two-factor auth enabled")
 }
 
 func disableTwoFAEndpoint(w http.ResponseWriter, req *http.Request) {
@@ -267,6 +268,7 @@ func disableTwoFAEndpoint(w http.ResponseWriter, req *http.Request) {
 	Chk(err)
 
 	response(w, userActual.FAuthEnabled, "Two-factor auth disabled")
+	tracelog.Trace("server", "disableTwoFAEndpoint", "Two-factor auth disabled")
 }
 
 func getUserFauth(w http.ResponseWriter, req *http.Request) {
@@ -322,6 +324,7 @@ func VerifyOtpEndpoint(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	jwToken, _ := SignJwt(decodedToken, secretKey)
+
 	json.NewEncoder(w).Encode(jwToken)
 }
 
@@ -417,6 +420,7 @@ func register(w http.ResponseWriter, req *http.Request) {
 	saveUser(user, pass, fauth)
 
 	w.Write([]byte("Registered successfully"))
+	tracelog.Trace("server", "register", "User "+user+" registered")
 }
 
 // Autenticacion
@@ -431,7 +435,7 @@ func login(w http.ResponseWriter, req *http.Request) {
 
 	if checkIfExists(user.Name) == true {
 		if checkPassword(user.Name, user.Password) {
-			tracelog.Trace("server", "login", "Successful login")
+			tracelog.Trace("server", "login", "User "+user.Name+" logged in")
 			response(w, true, "Successful login")
 		} else {
 			tracelog.Trace("server", "login", "Wrong password")
@@ -444,7 +448,7 @@ func login(w http.ResponseWriter, req *http.Request) {
 }
 
 // Lista de archivos del usuario y actualiza el usuario en bd
-func list(w http.ResponseWriter, req *http.Request) {
+func listUserFiles(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain") // cabecera estándar
 
 	fmt.Println("-- FILES --")
@@ -465,6 +469,7 @@ func list(w http.ResponseWriter, req *http.Request) {
 	ficheros, _ := json.Marshal(files)
 
 	w.Write(ficheros)
+	tracelog.Trace("server", "listUserFiles", "Files of "+user+" listed")
 }
 
 // Funcion auxiliar para añadir la info de un fichero a la bd
@@ -497,6 +502,8 @@ func addFileToBD(file File, user string) {
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
 	Chk(err)
+
+	tracelog.Trace("server", "addFileToBD", "File "+file.Name+" added to db")
 }
 
 func deleteFileFromBD(userFiles Files, filename string, user string) {
@@ -540,6 +547,8 @@ func deleteFileFromBD(userFiles Files, filename string, user string) {
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
 	Chk(err)
+
+	tracelog.Trace("server", "deleteFileFromBD", "File "+filename+" deleted from db")
 }
 
 // Funcion para subir archivo
@@ -583,9 +592,11 @@ func upload(w http.ResponseWriter, req *http.Request) {
 		addFileToBD(archivoAñadir, user)
 
 		response(w, true, "File "+filename+" uploaded")
+		tracelog.Trace("server", "upload", "File "+filename+" uploaded to db")
 
 	} else {
 		response(w, false, "The file does not exist")
+		tracelog.Trace("server", "upload", "Error getting file")
 	}
 
 }
@@ -627,8 +638,10 @@ func download(w http.ResponseWriter, req *http.Request) {
 		}
 
 		response(w, true, "File "+filename+" downloaded")
+		tracelog.Trace("server", "download", "File "+filename+" downloaded")
 	} else {
 		response(w, false, "The file does not exist")
+		tracelog.Trace("server", "download", "Error getting file")
 	}
 
 }
@@ -659,8 +672,10 @@ func delete(w http.ResponseWriter, req *http.Request) {
 		deleteFileFromBD(userFiles, filename, user)
 
 		response(w, true, "File "+filename+" deleted")
+		tracelog.Trace("server", "delete", "File "+filename+" deleted")
 	} else {
 		response(w, false, "The file does not exist")
+		tracelog.Trace("server", "delete", "Error getting file")
 	}
 
 }
@@ -781,6 +796,8 @@ func saveUser(username string, password string, fauth string) {
 	// Guardamos el mapa serializado en formato JSON
 	err = ioutil.WriteFile("./db/db.json", jsonString, 0644)
 	Chk(err)
+
+	tracelog.Trace("server", "saveUser", "User "+username+" saved")
 }
 
 // Comprueba si el usuario ya existe en la bbdd
